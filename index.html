@@ -427,8 +427,9 @@ ${l.length === 0 ? '<div class="vazio">Nenhum produto ainda. Clique em "Novo pro
 <td><strong>R$ ${formatarMoeda(p.valor)}</strong></td>
 <td>${p.margemPct || 0}%</td>
 <td class="acoes">
-<button class="btn-acao" onclick='editarProduto(${p._linha})'>✎</button>
-<button class="btn-acao" onclick='excluir("produtos", ${p._linha})'>🗑</button>
+<button class="btn-acao" title="Editar" onclick='editarProduto(${p._linha})'>✎</button>
+<button class="btn-acao" title="Duplicar" onclick='duplicarProduto(${p._linha})'>⎘</button>
+<button class="btn-acao" title="Excluir" onclick='excluir("produtos", ${p._linha})'>🗑</button>
 </td>
 </tr>`).join('')}</tbody>
 </table></div>`}`;
@@ -815,13 +816,20 @@ if (ok) await recarregarAba(aba);
 // ========================================================
 // MODAL DE PRODUTO
 // ========================================================
-function abrirModalProduto(produto = null, linhaId = null) {
+function abrirModalProduto(produto = null, linhaId = null, nomeParaReceita = null) {
 const cfg = dados.configuracoes;
-const titulo = produto ? 'Editar produto' : 'Novo produto';
+// Decide o título: editar (linhaId) / duplicar (produto sem linhaId) / novo
+let titulo;
+if (produto && linhaId) titulo = 'Editar produto';
+else if (produto && !linhaId) titulo = 'Duplicar produto';
+else titulo = 'Novo produto';
 
+// Carrega a receita: usa o nome do produto OU o nome original (em caso de duplicar,
+// pq produto.nome já vem com " (cópia)" e não baterá com a receita)
 if (produto) {
+const nomeRef = nomeParaReceita || produto.nome;
 materiaisProdutoAtual = dados.receitas
-.filter(r => String(r.produto).trim() === String(produto.nome).trim())
+.filter(r => String(r.produto).trim() === String(nomeRef).trim())
 .map(r => ({ material: r.material, quantidade: Number(r.quantidade) }));
 } else {
 materiaisProdutoAtual = [];
@@ -986,6 +994,16 @@ await Promise.all([recarregarAba('produtos'), recarregarReceitas()]);
 function editarProduto(linha) {
 const p = dados.produtos.find(x => x._linha === linha);
 if (p) abrirModalProduto(p, linha);
+}
+
+function duplicarProduto(linha) {
+const p = dados.produtos.find(x => x._linha === linha);
+if (!p) return;
+// Cria uma cópia com " (cópia)" no nome e abre o modal como NOVO.
+// Passa o nome original em nomeParaReceita pra carregar a ficha técnica certa.
+const copia = { ...p, nome: p.nome + ' (cópia)' };
+delete copia._linha;
+abrirModalProduto(copia, null, p.nome);
 }
 
 // ========================================================
