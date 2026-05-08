@@ -148,7 +148,7 @@ animation: girar 0.8s linear infinite; margin: 40px auto; }
 <!-- TELA DE LOGIN -->
 <div id="tela-login">
 <div class="card-login">
-<img src="logo.png" alt="Papelê" style="max-width: 240px; height: auto; margin-bottom: 8px;">
+<img src="logo.jpg" alt="Papelê" style="max-width: 240px; height: auto; margin-bottom: 8px;">
 <div class="sublogo">Papelaria Criativa</div>
 <p>Entre com a conta Google autorizada pra acessar o sistema.</p>
 <div id="g_id_onload"
@@ -163,7 +163,7 @@ data-callback="handleCredentialResponse"></div>
 <div id="app">
 <header>
 <div>
-<img src="logo.png" alt="Papelê" style="height: 42px; width: auto; display: block;">
+<img src="logo.jpg" alt="Papelê" style="height: 42px; width: auto; display: block;">
 <div class="sublogo-topo" style="margin-top: 2px;">Papelaria Criativa</div>
 </div>
 <div style="display:flex; align-items:center; gap:16px;">
@@ -196,7 +196,7 @@ data-callback="handleCredentialResponse"></div>
 const CONFIG = {
 apiUrl: 'https://script.google.com/macros/s/AKfycbyXBxWpXDYINbcFdawtG_VFlBNlSkaHS6v0kBl5egP4YsOvRZMlkk9fmtNe33g-rhZ9/exec',
 googleClientId: '551735406249-p9f95t4p17dhn4kdcs56ejangsv1berl.apps.googleusercontent.com',
-logoUrl: 'logo.png'
+logoUrl: 'logo.jpg'
 };
 
 // Configuração de pagamento
@@ -210,7 +210,7 @@ let dados = { clientes: [], materiais: [], produtos: [], estoque: [], caixa: [],
 let abaAtual = 'clientes';
 let itensOrcamento = [];
 let materiaisProdutoAtual = [];
-let formaPagamentoAtual = 'pix'; // 'pix' ou 'cartao'
+let formaPagamentoAtual = null; // null = não especificar (default), 'pix' ou 'cartao'
 
 const CAMPOS = {
 clientes: ['nome', 'telefone', 'email', 'documento', 'origem', 'endereco', 'primeiroContato', 'aniversario', 'obs'],
@@ -557,7 +557,14 @@ ${dados.produtos.map((p, i) => `<option value="${i}">${esc(p.nome)} — R$ ${for
 </select>
 </div>
 <div class="card" style="margin-top:12px;">
-<h4>Forma de pagamento</h4>
+<h4>Forma de pagamento <span style="font-weight:400;color:var(--cinza);font-size:12px;">(opcional)</span></h4>
+<label style="display:flex;align-items:center;gap:8px;padding:10px;border:2px solid ${formaPagamentoAtual===null?'var(--rosa)':'var(--borda)'};border-radius:8px;cursor:pointer;margin-bottom:8px;">
+<input type="radio" name="forma-pgto" value="" ${formaPagamentoAtual===null?'checked':''} onchange="trocarFormaPagamento(null)" style="width:auto;">
+<div style="flex:1;">
+<div style="font-weight:500;color:var(--rosa-escuro);">Não especificar</div>
+<div style="font-size:11px;color:var(--cinza);">Orçamento sai sem indicar forma de pagamento</div>
+</div>
+</label>
 <label style="display:flex;align-items:center;gap:8px;padding:10px;border:2px solid ${formaPagamentoAtual==='pix'?'var(--rosa)':'var(--borda)'};border-radius:8px;cursor:pointer;margin-bottom:8px;">
 <input type="radio" name="forma-pgto" value="pix" ${formaPagamentoAtual==='pix'?'checked':''} onchange="trocarFormaPagamento('pix')" style="width:auto;">
 <div style="flex:1;">
@@ -605,6 +612,10 @@ ${renderBlocoPagamento(total, totalPix)}
 }
 
 function renderBlocoPagamento(total, totalPix) {
+if (formaPagamentoAtual === null) {
+// Sem forma especificada — não renderiza nada no preview
+return '';
+}
 if (formaPagamentoAtual === 'pix') {
 return `
 <div class="linha-pgto"><span>Forma de pagamento</span><strong>Pix</strong></div>
@@ -708,7 +719,8 @@ styles: { fontSize: 10 }
 
 let yFim = doc.lastAutoTable.finalY + 10;
 
-// Bloco de forma de pagamento
+// Bloco de forma de pagamento — só desenha se uma forma estiver especificada
+if (formaPagamentoAtual !== null) {
 doc.setFillColor(255, 245, 249);
 doc.rect(20, yFim, 170, formaPagamentoAtual === 'pix' ? 26 : 22, 'F');
 
@@ -735,6 +747,7 @@ doc.setTextColor(120, 120, 120);
 doc.setFont('helvetica', 'italic');
 doc.text('* Valor sujeito a acréscimo conforme taxa da maquininha', 25, yFim + 20);
 yFim += 26;
+}
 }
 
 doc.setFont('helvetica', 'normal');
