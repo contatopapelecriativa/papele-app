@@ -136,6 +136,16 @@ border-top: 2px solid var(--rosa); font-weight: 600; color: var(--rosa-escuro); 
 /* TOAST */
 #toast { position: fixed; bottom: 20px; right: 20px; background: var(--rosa-escuro); color: white;
 padding: 12px 20px; border-radius: 8px; font-size: 13px; z-index: 200; display: none; }
+/* PEDIDOS — badges e filtros */
+.badge-status { display: inline-block; padding: 4px 10px; border-radius: 12px;
+                font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }
+.chip-filtro { background: white; border: 1px solid var(--borda); border-radius: 16px;
+               padding: 6px 12px; font-size: 12px; color: var(--cinza); cursor: pointer;
+               transition: all 0.15s; }
+.chip-filtro:hover { border-color: var(--rosa); color: var(--rosa-escuro); }
+.chip-filtro.ativo { background: var(--rosa); border-color: var(--rosa);
+                     color: white; font-weight: 600; }
+
 /* SPINNER */
 .spinner { width: 24px; height: 24px; border: 3px solid var(--rosa-claro);
 border-top-color: var(--rosa); border-radius: 50%;
@@ -180,6 +190,8 @@ data-callback="handleCredentialResponse"></div>
 <button data-aba="materiais" onclick="mudarAba('materiais')">Materiais</button>
 <button data-aba="produtos" onclick="mudarAba('produtos')">Produtos</button>
 <button data-aba="estoque" onclick="mudarAba('estoque')">Estoque</button>
+<button data-aba="orcamentos" onclick="mudarAba('orcamentos')">Orçamentos</button>
+<button data-aba="pedidos" onclick="mudarAba('pedidos')">Pedidos</button>
 <button data-aba="caixa" onclick="mudarAba('caixa')">Caixa</button>
 <button class="destaque" data-aba="bot" onclick="mudarAba('bot')">Bot orçamento</button>
 </nav>
@@ -206,18 +218,29 @@ const DESCONTO_PIX = 0.05; // 5% de desconto
 // ESTADO
 // ========================================================
 let emailAtual = null;
-let dados = { clientes: [], materiais: [], produtos: [], estoque: [], caixa: [], receitas: [], configuracoes: {} };
+let dados = { clientes: [], materiais: [], produtos: [], estoque: [], caixa: [], pedidos: [], receitas: [], configuracoes: {} };
 let abaAtual = 'clientes';
 let itensOrcamento = [];
 let materiaisProdutoAtual = [];
 let formaPagamentoAtual = null; // null = não especificar (default), 'pix' ou 'cartao'
+let filtroOrcamentos = 'pendentes'; // pendentes | recusados | todos
+let filtroPedidos = 'aprovados';    // aprovados | producao | entregues | todos
 
 const CAMPOS = {
 clientes: ['nome', 'telefone', 'email', 'documento', 'origem', 'endereco', 'primeiroContato', 'aniversario', 'obs'],
 materiais: ['nome', 'categoria', 'unidade', 'custo', 'fornecedor', 'obs'],
 produtos: ['nome', 'categoria', 'unidade', 'valor', 'descricao', 'maoObra', 'outrosCustos', 'margemPct'],
 estoque: ['nome', 'categoria', 'unidade', 'quantidade', 'minimo', 'obs'],
-caixa: ['data', 'tipo', 'descricao', 'categoria', 'valor', 'pagamento', 'obs']
+caixa: ['data', 'tipo', 'descricao', 'categoria', 'valor', 'pagamento', 'obs'],
+pedidos: ['data', 'cliente', 'empresa', 'tema', 'descricao', 'total', 'prazoDias', 'prazoEntrega', 'status', 'obs']
+};
+
+const STATUS_PEDIDOS = {
+ORCAMENTO:  'Orçamento',
+APROVADO:   'Aprovado',
+RECUSADO:   'Recusado',
+PRODUCAO:   'Em produção',
+ENTREGUE:   'Entregue'
 };
 
 // ========================================================
@@ -259,6 +282,7 @@ dados.materiais = j.materiais || [];
 dados.produtos = j.produtos || [];
 dados.estoque = j.estoque || [];
 dados.caixa = j.caixa || [];
+dados.pedidos = j.pedidos || [];
 dados.receitas = j.receitas || [];
 dados.configuracoes = j.configuracoes || { maoObraPadrao: 0.10, outrosCustosPadrao: 0.05, margemPctPadrao: 30 };
 mostrarStatus('Sincronizado', true);
@@ -326,6 +350,8 @@ if (aba === 'clientes') c.innerHTML = renderClientes();
 else if (aba === 'materiais') c.innerHTML = renderMateriais();
 else if (aba === 'produtos') c.innerHTML = renderProdutos();
 else if (aba === 'estoque') c.innerHTML = renderEstoque();
+else if (aba === 'orcamentos') c.innerHTML = renderOrcamentos();
+else if (aba === 'pedidos') c.innerHTML = renderPedidos();
 else if (aba === 'caixa') c.innerHTML = renderCaixa();
 else if (aba === 'bot') c.innerHTML = renderBot();
 }
@@ -516,6 +542,244 @@ ${l.length === 0 ? '<div class="vazio">Nenhuma movimentação.</div>' : `
 }
 
 // ========================================================
+// ABA: ORÇAMENTOS (registrados pelo Bot, aguardando decisão)
+// ========================================================
+function renderOrcamentos() {
+const todos = (dados.pedidos || []);
+const pendentes = todos.filter(p => p.status === STATUS_PEDIDOS.ORCAMENTO);
+const recusados = todos.filter(p => p.status === STATUS_PEDIDOS.RECUSADO);
+
+let lista;
+if (filtroOrcamentos === 'pendentes') lista = pendentes;
+else if (filtroOrcamentos === 'recusados') lista = recusados;
+else lista = pendentes.concat(recusados);
+
+// Mais novos primeiro
+lista = lista.slice().sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+
+return `
+<div class="cabecalho-aba">
+<div><h2>Orçamentos</h2><p>${pendentes.length} aguardando decisão · ${recusados.length} recusado(s)</p></div>
+</div>
+
+<div class="stats-grid">
+<div class="stat-card"><div class="stat-label">Pendentes</div><div class="stat-valor">${pendentes.length}</div></div>
+<div class="stat-card"><div class="stat-label">Recusados</div><div class="stat-valor vermelho">${recusados.length}</div></div>
+</div>
+
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+<button class="chip-filtro ${filtroOrcamentos === 'pendentes' ? 'ativo' : ''}" onclick="filtrarOrcamentos('pendentes')">Pendentes</button>
+<button class="chip-filtro ${filtroOrcamentos === 'recusados' ? 'ativo' : ''}" onclick="filtrarOrcamentos('recusados')">Recusados</button>
+<button class="chip-filtro ${filtroOrcamentos === 'todos' ? 'ativo' : ''}" onclick="filtrarOrcamentos('todos')">Todos</button>
+</div>
+
+${lista.length === 0 ? `<div class="vazio">Nenhum orçamento ${filtroOrcamentos === 'pendentes' ? 'aguardando decisão' : filtroOrcamentos === 'recusados' ? 'recusado' : 'cadastrado'}.</div>` : `
+<div class="tabela-wrap"><table class="dados">
+<thead>
+<tr><th>Cliente</th><th>Descrição</th><th>Total</th><th>Data</th><th>Status</th><th></th></tr>
+</thead>
+<tbody>${lista.map(p => {
+const cor = corDoStatus(p.status);
+return `
+<tr>
+<td><strong>${esc(p.cliente || '-')}</strong>${p.empresa ? `<div style="font-size:11px;color:var(--cinza);">${esc(p.empresa)}</div>` : ''}</td>
+<td><div style="max-width:280px;line-height:1.4;">${esc(p.descricao || '-')}</div>${p.tema ? `<div style="font-size:11px;color:var(--cinza);margin-top:2px;">Tema: ${esc(p.tema)}</div>` : ''}</td>
+<td><strong>R$ ${formatarMoeda(p.total)}</strong></td>
+<td>${formatarData(p.data)}</td>
+<td><span class="badge-status" style="background:${cor.bg};color:${cor.fg};">${esc(p.status || '-')}</span></td>
+<td class="acoes" style="white-space:nowrap;">
+${p.status === STATUS_PEDIDOS.ORCAMENTO ? `
+<button class="btn-acao" title="Aprovar (vai pra fila de pedidos)" onclick='aprovarOrcamento(${p._linha})'>✓ Aprovar</button>
+<button class="btn-acao" title="Recusar" onclick='recusarOrcamento(${p._linha})'>✗ Recusar</button>
+` : ''}
+${p.status === STATUS_PEDIDOS.RECUSADO ? `
+<button class="btn-acao" title="Reabrir como orçamento pendente" onclick='reabrirOrcamento(${p._linha})'>↺ Reabrir</button>
+` : ''}
+<button class="btn-acao" title="Editar" onclick='editar("pedidos", ${p._linha})'>✎</button>
+<button class="btn-acao" title="Excluir" onclick='excluir("pedidos", ${p._linha})'>🗑</button>
+</td>
+</tr>`;
+}).join('')}</tbody>
+</table></div>`}`;
+}
+
+function filtrarOrcamentos(f) { filtroOrcamentos = f; renderizarAba('orcamentos'); }
+
+async function aprovarOrcamento(linha) {
+const p = dados.pedidos.find(x => x._linha === linha);
+if (!p) return;
+const prazoSugerido = Number(p.prazoDias || 4);
+const resp = prompt(`Aprovar este orçamento e mover pra fila de pedidos?\n\nQuantos dias úteis até a entrega?`, String(prazoSugerido));
+if (resp == null) return;
+const dias = Number(resp);
+if (!dias || dias < 0) { toast('Prazo inválido.'); return; }
+const dataEntrega = somarDiasUteis(new Date(), dias);
+const dadosAtualizados = {
+...p,
+status: STATUS_PEDIDOS.APROVADO,
+prazoDias: dias,
+prazoEntrega: formatarDataISO(dataEntrega)
+};
+delete dadosAtualizados._linha;
+const ok = await enviarPost({ acao: 'atualizar', aba: 'pedidos', linhaId: linha, dados: dadosAtualizados });
+if (ok) { await recarregarAba('pedidos'); renderizarAba('orcamentos'); toast('Aprovado. Veja na aba Pedidos.'); }
+}
+
+async function recusarOrcamento(linha) {
+const p = dados.pedidos.find(x => x._linha === linha);
+if (!p) return;
+if (!confirm(`Recusar este orçamento?\nEle fica visível na aba Orçamentos > Recusados.`)) return;
+const dadosAtualizados = { ...p, status: STATUS_PEDIDOS.RECUSADO };
+delete dadosAtualizados._linha;
+const ok = await enviarPost({ acao: 'atualizar', aba: 'pedidos', linhaId: linha, dados: dadosAtualizados });
+if (ok) await recarregarAba('pedidos');
+}
+
+async function reabrirOrcamento(linha) {
+const p = dados.pedidos.find(x => x._linha === linha);
+if (!p) return;
+const dadosAtualizados = { ...p, status: STATUS_PEDIDOS.ORCAMENTO };
+delete dadosAtualizados._linha;
+const ok = await enviarPost({ acao: 'atualizar', aba: 'pedidos', linhaId: linha, dados: dadosAtualizados });
+if (ok) await recarregarAba('pedidos');
+}
+
+// ========================================================
+// ABA: PEDIDOS (fila de produção — só os aprovados)
+// ========================================================
+function renderPedidos() {
+const todos = (dados.pedidos || []);
+const aprovados = todos.filter(p => p.status === STATUS_PEDIDOS.APROVADO);
+const producao  = todos.filter(p => p.status === STATUS_PEDIDOS.PRODUCAO);
+const entregues = todos.filter(p => p.status === STATUS_PEDIDOS.ENTREGUE);
+
+const hoje = new Date(); hoje.setHours(0,0,0,0);
+const atrasados = aprovados.concat(producao).filter(p => {
+if (!p.prazoEntrega) return false;
+const d = parseDataBR(p.prazoEntrega);
+return d && d < hoje;
+}).length;
+
+let lista;
+if (filtroPedidos === 'aprovados') lista = aprovados;
+else if (filtroPedidos === 'producao') lista = producao;
+else if (filtroPedidos === 'entregues') lista = entregues;
+else lista = aprovados.concat(producao, entregues);
+
+// Ordena por prazo de entrega ascendente (mais próximos primeiro)
+lista = lista.slice().sort((a, b) => {
+const da = parseDataBR(a.prazoEntrega) || new Date(8640000000000000);
+const db = parseDataBR(b.prazoEntrega) || new Date(8640000000000000);
+return da - db;
+});
+
+return `
+<div class="cabecalho-aba">
+<div><h2>Pedidos</h2><p>Fila de produção${atrasados > 0 ? ` · <span style="color:var(--vermelho)">${atrasados} em atraso</span>` : ''}</p></div>
+</div>
+
+<div class="stats-grid">
+<div class="stat-card"><div class="stat-label">Aguardando</div><div class="stat-valor">${aprovados.length}</div></div>
+<div class="stat-card"><div class="stat-label">Em produção</div><div class="stat-valor verde">${producao.length}</div></div>
+<div class="stat-card"><div class="stat-label">Em atraso</div><div class="stat-valor ${atrasados>0?'vermelho':''}">${atrasados}</div></div>
+<div class="stat-card"><div class="stat-label">Entregues</div><div class="stat-valor">${entregues.length}</div></div>
+</div>
+
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+<button class="chip-filtro ${filtroPedidos === 'aprovados' ? 'ativo' : ''}" onclick="filtrarPedidos('aprovados')">Aguardando</button>
+<button class="chip-filtro ${filtroPedidos === 'producao' ? 'ativo' : ''}" onclick="filtrarPedidos('producao')">Em produção</button>
+<button class="chip-filtro ${filtroPedidos === 'entregues' ? 'ativo' : ''}" onclick="filtrarPedidos('entregues')">Entregues</button>
+<button class="chip-filtro ${filtroPedidos === 'todos' ? 'ativo' : ''}" onclick="filtrarPedidos('todos')">Todos</button>
+</div>
+
+${lista.length === 0 ? `<div class="vazio">Nenhum pedido ${filtroPedidos === 'todos' ? 'cadastrado' : 'nesse status'}.</div>` : `
+<div class="tabela-wrap"><table class="dados">
+<thead>
+<tr><th>Cliente</th><th>Descrição do pedido</th><th>Total</th><th>Prazo de entrega</th><th>Status</th><th></th></tr>
+</thead>
+<tbody>${lista.map(p => {
+const dEntrega = parseDataBR(p.prazoEntrega);
+const ehAtraso = dEntrega && dEntrega < hoje && (p.status === STATUS_PEDIDOS.APROVADO || p.status === STATUS_PEDIDOS.PRODUCAO);
+const cor = corDoStatus(p.status);
+return `
+<tr>
+<td><strong>${esc(p.cliente || '-')}</strong>${p.empresa ? `<div style="font-size:11px;color:var(--cinza);">${esc(p.empresa)}</div>` : ''}</td>
+<td><div style="max-width:280px;line-height:1.4;">${esc(p.descricao || '-')}</div>${p.tema ? `<div style="font-size:11px;color:var(--cinza);margin-top:2px;">Tema: ${esc(p.tema)}</div>` : ''}</td>
+<td><strong>R$ ${formatarMoeda(p.total)}</strong></td>
+<td>
+${p.prazoEntrega ? `<span style="${ehAtraso ? 'color:var(--vermelho);font-weight:600' : ''}">${formatarData(p.prazoEntrega)}</span>` : '<span style="color:var(--cinza);">—</span>'}
+${p.prazoDias ? `<div style="font-size:11px;color:var(--cinza);">${p.prazoDias} dias úteis</div>` : ''}
+</td>
+<td><span class="badge-status" style="background:${cor.bg};color:${cor.fg};">${esc(p.status || '-')}</span></td>
+<td class="acoes" style="white-space:nowrap;">
+${p.status === STATUS_PEDIDOS.APROVADO ? `<button class="btn-acao" title="Iniciar produção" onclick='mudarStatusPedido(${p._linha}, "${STATUS_PEDIDOS.PRODUCAO}")'>▶ Iniciar</button>` : ''}
+${p.status === STATUS_PEDIDOS.PRODUCAO ? `<button class="btn-acao" title="Marcar como entregue" onclick='mudarStatusPedido(${p._linha}, "${STATUS_PEDIDOS.ENTREGUE}")'>✓ Entregar</button>` : ''}
+<button class="btn-acao" title="Editar" onclick='editar("pedidos", ${p._linha})'>✎</button>
+<button class="btn-acao" title="Excluir" onclick='excluir("pedidos", ${p._linha})'>🗑</button>
+</td>
+</tr>`;
+}).join('')}</tbody>
+</table></div>`}`;
+}
+
+function filtrarPedidos(f) { filtroPedidos = f; renderizarAba('pedidos'); }
+
+async function mudarStatusPedido(linha, novoStatus) {
+const p = dados.pedidos.find(x => x._linha === linha);
+if (!p) return;
+if (!confirm(`Marcar como "${novoStatus}"?`)) return;
+const dadosAtualizados = { ...p, status: novoStatus };
+delete dadosAtualizados._linha;
+const ok = await enviarPost({ acao: 'atualizar', aba: 'pedidos', linhaId: linha, dados: dadosAtualizados });
+if (ok) await recarregarAba('pedidos');
+}
+
+// Helpers compartilhados de pedidos
+function corDoStatus(s) {
+switch (s) {
+case STATUS_PEDIDOS.ORCAMENTO: return { bg: '#FFF5F9', fg: '#4B1528' };
+case STATUS_PEDIDOS.APROVADO:  return { bg: '#E6FAFB', fg: '#04342C' };
+case STATUS_PEDIDOS.PRODUCAO:  return { bg: '#FFF4D6', fg: '#7A5A00' };
+case STATUS_PEDIDOS.ENTREGUE:  return { bg: '#E8F5EA', fg: '#1F5C2E' };
+case STATUS_PEDIDOS.RECUSADO:  return { bg: '#F5E5E5', fg: '#7A1B1B' };
+default: return { bg: '#F5F5F5', fg: '#333' };
+}
+}
+
+function parseDataBR(s) {
+if (!s) return null;
+if (s instanceof Date) return s;
+const str = String(s);
+let m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+if (m) return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]));
+m = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
+if (m) {
+let y = Number(m[3]); if (y < 100) y += 2000;
+return new Date(y, Number(m[2])-1, Number(m[1]));
+}
+return null;
+}
+
+function formatarDataISO(d) {
+if (!d) return '';
+const y = d.getFullYear();
+const m = String(d.getMonth()+1).padStart(2,'0');
+const day = String(d.getDate()).padStart(2,'0');
+return `${y}-${m}-${day}`;
+}
+
+function somarDiasUteis(de, dias) {
+const d = new Date(de.getTime());
+let restantes = dias;
+while (restantes > 0) {
+d.setDate(d.getDate() + 1);
+const dow = d.getDay();
+if (dow !== 0 && dow !== 6) restantes--;
+}
+return d;
+}
+
+// ========================================================
 // ABA: BOT DE ORÇAMENTO
 // ========================================================
 function renderBot() {
@@ -607,9 +871,54 @@ ${renderBlocoPagamento(total, totalPix)}
 </div>
 <div style="display:flex;gap:8px;margin-top:12px;">
 <button class="btn-secundario" style="flex:1" onclick="gerarPDF()">📄 Baixar PDF</button>
+<button class="btn-primario" style="flex:1" onclick="salvarOrcamento()">💾 Salvar orçamento</button>
 </div>
 </div>
 </div>`;
+}
+
+async function salvarOrcamento() {
+if (itensOrcamento.length === 0) { toast('Adicione pelo menos um produto'); return; }
+const cliente = (document.getElementById('bot-cliente')?.value || '').trim();
+const empresa = (document.getElementById('bot-empresa')?.value || '').trim();
+const tema = (document.getElementById('bot-tema')?.value || '').trim();
+const prazoDias = Number(document.getElementById('bot-prazo')?.value || 4);
+if (!cliente) { toast('Selecione um cliente antes de salvar.'); return; }
+
+const subtotal = itensOrcamento.reduce((s, i) => s + (Number(i.valor) * Number(i.qtd)), 0);
+// Aplica desconto/acréscimo conforme forma de pagamento atual
+let totalFinal = subtotal;
+if (formaPagamentoAtual === 'pix') totalFinal = subtotal * (1 - DESCONTO_PIX);
+// Cartão: sem acréscimo automático aqui (depende da maquininha) — fica subtotal mesmo
+
+const descricao = itensOrcamento.map(i => `${i.qtd}x ${i.nome}`).join(' · ');
+const observacao = formaPagamentoAtual === 'pix'
+  ? 'Pgto: Pix (5% off)'
+  : formaPagamentoAtual === 'cartao'
+  ? 'Pgto: Cartão (sujeito a acréscimo)'
+  : '';
+
+const dadosPedido = {
+data: formatarDataISO(new Date()),
+cliente,
+empresa,
+tema,
+descricao,
+total: totalFinal.toFixed(2),
+prazoDias: String(prazoDias),
+prazoEntrega: '',
+status: STATUS_PEDIDOS.ORCAMENTO,
+obs: observacao
+};
+
+const ok = await enviarPost({ acao: 'adicionar', aba: 'pedidos', dados: dadosPedido });
+if (ok) {
+toast('Orçamento salvo. Veja na aba Orçamentos.');
+itensOrcamento = [];
+formaPagamentoAtual = null;
+await recarregarAba('pedidos');
+renderizarAba('bot');
+}
 }
 
 function renderBlocoPagamento(total, totalPix) {
@@ -678,7 +987,7 @@ try {
 const img = await fetch(CONFIG.logoUrl).then(r => r.blob()).then(b => new Promise((res, rej) => {
 const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(b);
 }));
-doc.addImage(img, 'JPEG', 75, 12, 60, 24);
+doc.addImage(img, 'PNG', 75, 12, 60, 24);
 } catch(e) {
 doc.setFont('helvetica', 'bold');
 doc.setTextColor(224, 74, 135);
