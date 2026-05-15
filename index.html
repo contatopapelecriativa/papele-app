@@ -210,9 +210,6 @@ googleClientId: '551735406249-p9f95t4p17dhn4kdcs56ejangsv1berl.apps.googleuserco
 logoUrl: 'logo.png'
 };
 
-// Configuração de pagamento
-const DESCONTO_PIX = 0.05; // 5% de desconto
-
 // ========================================================
 // ESTADO
 // ========================================================
@@ -225,12 +222,18 @@ let formaPagamentoAtual = null; // null = não especificar (default), 'pix' ou '
 let filtroOrcamentos = 'pendentes'; // pendentes | recusados | todos
 let filtroPedidos = 'aprovados';    // aprovados | producao | entregues | todos
 
+// Estado do Bot de orçamento
+let camposBot = { cliente: '', contato: '', empresa: '', tema: '', prazoDias: '4' };
+let descontoPixAtual = 5;   // porcentagem padrão de desconto Pix
+let cupomAtual = '';         // ex: "papele10" → 10% off
+let orcamentoEditando = null; // { linhaId } quando editando um orçamento existente
+
 const CAMPOS = {
 clientes: ['nome', 'telefone', 'email', 'documento', 'origem', 'endereco', 'primeiroContato', 'aniversario', 'obs'],
 materiais: ['nome', 'categoria', 'unidade', 'custo', 'fornecedor', 'quantidade', 'minimo', 'obs'],
 produtos: ['nome', 'categoria', 'unidade', 'valor', 'descricao', 'maoObra', 'outrosCustos', 'margemPct'],
 caixa: ['data', 'tipo', 'descricao', 'categoria', 'valor', 'pagamento', 'obs'],
-pedidos: ['data', 'cliente', 'empresa', 'tema', 'descricao', 'total', 'prazoDias', 'prazoEntrega', 'status', 'obs']
+pedidos: ['data', 'cliente', 'empresa', 'tema', 'descricao', 'total', 'prazoDias', 'prazoEntrega', 'status', 'obs', 'dadosCompletos']
 };
 
 const STATUS_PEDIDOS = {
@@ -566,7 +569,8 @@ ${p.status === STATUS_PEDIDOS.ORCAMENTO ? `
 ${p.status === STATUS_PEDIDOS.RECUSADO ? `
 <button class="btn-acao" title="Reabrir como orçamento pendente" onclick='reabrirOrcamento(${p._linha})'>↺ Reabrir</button>
 ` : ''}
-<button class="btn-acao" title="Editar" onclick='editar("pedidos", ${p._linha})'>✎</button>
+<button class="btn-acao" title="Reabrir no Bot pra editar" onclick='editarNoBot(${p._linha})'>✎ Editar</button>
+<button class="btn-acao" title="Baixar PDF do orçamento" onclick='baixarPdfDoOrcamento(${p._linha})'>📄 PDF</button>
 <button class="btn-acao" title="Excluir" onclick='excluir("pedidos", ${p._linha})'>🗑</button>
 </td>
 </tr>`;
@@ -613,6 +617,65 @@ const dadosAtualizados = { ...p, status: STATUS_PEDIDOS.ORCAMENTO };
 delete dadosAtualizados._linha;
 const ok = await enviarPost({ acao: 'atualizar', aba: 'pedidos', linhaId: linha, dados: dadosAtualizados });
 if (ok) await recarregarAba('pedidos');
+}
+
+// Reabre um orçamento salvo no Bot pra edição
+function editarNoBot(linha) {
+const p = dados.pedidos.find(x => x._linha === linha);
+if (!p) { toast('Orçamento não encontrado.'); return; }
+let extra = {};
+try { extra = JSON.parse(p.dadosCompletos || '{}'); } catch(e) {}
+
+if (!extra.itens || !extra.itens.length) {
+toast('Esse orçamento foi salvo numa versão antiga e não pode ser reaberto. Crie um novo.');
+return;
+}
+
+camposBot = {
+cliente: p.cliente || '',
+contato: extra.contato || '',
+empresa: p.empresa || '',
+tema: p.tema || '',
+prazoDias: String(p.prazoDias || '')
+};
+itensOrcamento = extra.itens.map(i => ({
+nome: i.nome || '',
+valor: Number(i.valor) || 0,
+qtd: Number(i.qtd) || 1,
+descricao: i.descricao || '',
+fonte: i.fonte || 'produto'
+}));
+formaPagamentoAtual = extra.formaPagamento || null;
+descontoPixAtual = Number(extra.descontoPixPct != null ? extra.descontoPixPct : 5);
+cupomAtual = extra.cupom || '';
+orcamentoEditando = { linhaId: linha, status: p.status };
+mudarAba('bot');
+toast('Orçamento carregado no Bot. Edite e clique em Atualizar.');
+}
+
+// Baixar PDF de um orçamento salvo (não precisa abrir Bot)
+async function baixarPdfDoOrcamento(linha) {
+const p = dados.pedidos.find(x => x._linha === linha);
+if (!p) { toast('Orçamento não encontrado.'); return; }
+let extra = {};
+try { extra = JSON.parse(p.dadosCompletos || '{}'); } catch(e) {}
+
+if (!extra.itens || !extra.itens.length) {
+toast('Esse orçamento foi salvo numa versão antiga sem dados completos. Reabra no Bot pra refazer.');
+return;
+}
+
+await gerarPDFComDados({
+cliente: p.cliente,
+contato: extra.contato || '',
+empresa: p.empresa,
+tema: p.tema,
+prazoDias: p.prazoDias,
+itens: extra.itens,
+formaPagamento: extra.formaPagamento || null,
+descontoPixPct: Number(extra.descontoPixPct != null ? extra.descontoPixPct : 5),
+cupom: extra.cupom || ''
+});
 }
 
 // ========================================================
@@ -754,44 +817,81 @@ return d;
 // ABA: BOT DE ORÇAMENTO
 // ========================================================
 function renderBot() {
-const total = itensOrcamento.reduce((s, i) => s + (Number(i.valor) * Number(i.qtd)), 0);
-const totalPix = total * (1 - DESCONTO_PIX);
+const subtotal = itensOrcamento.reduce((s, i) => s + (Number(i.valor) * Number(i.qtd)), 0);
+const desc = calcularDescontos(subtotal);
+const total = Math.max(0, subtotal - desc.valorDesconto);
+
 return `
 <div class="cabecalho-aba">
-<div><h2>Bot de orçamento</h2><p>Monte um orçamento em segundos</p></div>
+<div>
+<h2>Bot de orçamento</h2>
+<p>${orcamentoEditando ? `<span style="color:var(--rosa);font-weight:500;">✎ Editando orçamento</span> · <a href="#" onclick="cancelarEdicaoBot();return false;" style="color:var(--cinza);">cancelar</a>` : 'Monte um orçamento em segundos'}</p>
+</div>
 </div>
 <div class="bot-layout">
 <div>
+
 <div class="card">
 <h4>Dados do cliente</h4>
-<label style="font-size:12px;color:var(--cinza);">Cliente</label>
-<select id="bot-cliente" onchange="atualizarPreview()">
+<label style="font-size:12px;color:var(--cinza);">Cliente *</label>
+<select id="bot-cliente" onchange="onClienteBotChange()">
 <option value="">Selecione...</option>
-${dados.clientes.map(c => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('')}
+${dados.clientes.map(c => `<option value="${esc(c.nome)}" ${camposBot.cliente === c.nome ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}
 </select>
-<label style="margin-top:10px; display:block; font-size:12px; color:var(--cinza);">Empresa (opcional)</label>
-<input type="text" id="bot-empresa" onchange="atualizarPreview()" placeholder="Ex: Doceria Nina">
-<label style="margin-top:10px; display:block; font-size:12px; color:var(--cinza);">Tema / observação</label>
-<input type="text" id="bot-tema" onchange="atualizarPreview()" placeholder="Ex: Páscoa">
-<label style="margin-top:10px; display:block; font-size:12px; color:var(--cinza);">Prazo (dias úteis)</label>
-<input type="number" id="bot-prazo" value="4" onchange="atualizarPreview()">
+<label style="margin-top:10px;display:block;font-size:12px;color:var(--cinza);">Contato</label>
+<input type="text" id="bot-contato" value="${esc(camposBot.contato || '')}" onchange="camposBot.contato = this.value;" placeholder="Telefone, e-mail ou WhatsApp">
 </div>
+
 <div class="card" style="margin-top:12px;">
-<h4>Produtos</h4>
+<h4>Detalhes <span style="font-weight:400;color:var(--cinza);font-size:12px;">(opcional)</span></h4>
+<label style="font-size:12px;color:var(--cinza);">Empresa</label>
+<input type="text" id="bot-empresa" value="${esc(camposBot.empresa || '')}" onchange="camposBot.empresa = this.value; atualizarPreview()" placeholder="Ex: Doceria Nina">
+<label style="margin-top:10px;display:block;font-size:12px;color:var(--cinza);">Tema / observação</label>
+<input type="text" id="bot-tema" value="${esc(camposBot.tema || '')}" onchange="camposBot.tema = this.value; atualizarPreview()" placeholder="Ex: Páscoa">
+<label style="margin-top:10px;display:block;font-size:12px;color:var(--cinza);">Prazo (dias úteis)</label>
+<input type="number" id="bot-prazo" min="0" value="${esc(camposBot.prazoDias || '')}" onchange="camposBot.prazoDias = this.value; atualizarPreview()" placeholder="Ex: 4">
+</div>
+
+<div class="card" style="margin-top:12px;">
+<h4>Itens</h4>
 <div id="lista-produtos-bot">
-${itensOrcamento.length === 0 ? '<p style="font-size:12px;color:var(--cinza);">Nenhum produto ainda</p>' : itensOrcamento.map((i, idx) => `
-<div class="produto-item">
-<div>${esc(i.nome)}<div style="font-size:11px;color:var(--cinza);">R$ ${formatarMoeda(i.valor)}</div></div>
-<input type="number" min="1" value="${i.qtd}" onchange="ajustarQtd(${idx}, this.value)">
+${itensOrcamento.length === 0 ? '<p style="font-size:12px;color:var(--cinza);">Nenhum item ainda.</p>' :
+itensOrcamento.map((it, idx) => `
+<div style="border:1px solid var(--borda);border-radius:8px;padding:10px;margin-bottom:8px;background:#fafafa;">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+<div style="flex:1;">
+<div style="font-weight:500;color:var(--rosa-escuro);">${esc(it.nome)}</div>
+${it.fonte === 'material' ? '<span style="font-size:10px;color:var(--turquesa-escuro);background:#E6FAFB;padding:2px 6px;border-radius:8px;display:inline-block;margin-top:2px;">item avulso</span>' : ''}
+</div>
 <button class="btn-remover" onclick="removerItem(${idx})">×</button>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;">
+<div>
+<label style="font-size:10px;color:var(--cinza);">Valor unit. (R$)</label>
+<input type="number" step="0.01" min="0" value="${it.valor}" onchange="ajustarValor(${idx}, this.value)">
+</div>
+<div>
+<label style="font-size:10px;color:var(--cinza);">Quantidade</label>
+<input type="number" step="1" min="1" value="${it.qtd}" onchange="ajustarQtd(${idx}, this.value)">
+</div>
+</div>
+<input type="text" placeholder="Descrição do item (opcional)" value="${esc(it.descricao || '')}" onchange="ajustarDescricao(${idx}, this.value)" style="margin-top:6px;font-size:12px;">
+<div style="text-align:right;font-size:11px;color:var(--cinza);margin-top:4px;">Subtotal: <strong>R$ ${formatarMoeda(Number(it.valor) * Number(it.qtd))}</strong></div>
 </div>`).join('')}
 </div>
-<label style="margin-top:12px; display:block; font-size:12px; color:var(--cinza);">Adicionar produto</label>
-<select id="bot-produto-novo" onchange="adicionarItemOrcamento(this.value); this.value='';">
+
+<label style="margin-top:12px;display:block;font-size:12px;color:var(--cinza);">Adicionar item</label>
+<select id="bot-item-novo" onchange="adicionarItemBot(this.value); this.value='';">
 <option value="">Selecione...</option>
-${dados.produtos.map((p, i) => `<option value="${i}">${esc(p.nome)} — R$ ${formatarMoeda(p.valor)}</option>`).join('')}
+<optgroup label="Produtos">
+${dados.produtos.map((p, i) => `<option value="produto:${i}">${esc(p.nome)} — R$ ${formatarMoeda(p.valor)}</option>`).join('')}
+</optgroup>
+<optgroup label="Materiais (item avulso)">
+${dados.materiais.map((m, i) => `<option value="material:${i}">${esc(m.nome)} — R$ ${formatarMoeda(m.custo)} (custo)</option>`).join('')}
+</optgroup>
 </select>
 </div>
+
 <div class="card" style="margin-top:12px;">
 <h4>Forma de pagamento <span style="font-weight:400;color:var(--cinza);font-size:12px;">(opcional)</span></h4>
 <label style="display:flex;align-items:center;gap:8px;padding:10px;border:2px solid ${formaPagamentoAtual===null?'var(--rosa)':'var(--borda)'};border-radius:8px;cursor:pointer;margin-bottom:8px;">
@@ -805,7 +905,9 @@ ${dados.produtos.map((p, i) => `<option value="${i}">${esc(p.nome)} — R$ ${for
 <input type="radio" name="forma-pgto" value="pix" ${formaPagamentoAtual==='pix'?'checked':''} onchange="trocarFormaPagamento('pix')" style="width:auto;">
 <div style="flex:1;">
 <div style="font-weight:500;color:var(--rosa-escuro);">Pix</div>
-<div style="font-size:11px;color:var(--verde);">5% de desconto aplicado</div>
+<div style="font-size:11px;color:var(--verde);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+<input type="number" min="0" max="100" step="0.5" value="${descontoPixAtual}" onchange="descontoPixAtual = Number(this.value) || 0; renderizarAba('bot');" style="width:70px;padding:2px 6px;font-size:11px;" onclick="event.stopPropagation()"> % de desconto
+</div>
 </div>
 </label>
 <label style="display:flex;align-items:center;gap:8px;padding:10px;border:2px solid ${formaPagamentoAtual==='cartao'?'var(--rosa)':'var(--borda)'};border-radius:8px;cursor:pointer;">
@@ -816,97 +918,120 @@ ${dados.produtos.map((p, i) => `<option value="${i}">${esc(p.nome)} — R$ ${for
 </div>
 </label>
 </div>
+
+<div class="card" style="margin-top:12px;">
+<h4>Cupom <span style="font-weight:400;color:var(--cinza);font-size:12px;">(opcional)</span></h4>
+<input type="text" id="bot-cupom" value="${esc(cupomAtual)}" onchange="cupomAtual = this.value; renderizarAba('bot');" placeholder="Ex: papele10 (10% de desconto)" style="text-transform:lowercase;">
+${cupomAtual ? (parsearCupom(cupomAtual) != null
+  ? `<div style="margin-top:6px;font-size:11px;color:var(--verde);">✓ Cupom válido: ${parsearCupom(cupomAtual)}% de desconto</div>`
+  : `<div style="margin-top:6px;font-size:11px;color:var(--vermelho);">⚠ Formato inválido. Use: papele[número]. Ex: papele10</div>`
+) : '<div style="margin-top:4px;font-size:11px;color:var(--cinza);">Formato: papele + porcentagem. Ex: papele15 = 15% de desconto.</div>'}
 </div>
+
+</div>
+
 <div>
 <div class="preview-orcamento" id="preview">
 <img src="logo.png" alt="Papelê" style="max-width: 180px; height: auto; display: block; margin: 0 auto;">
 <div style="text-align:center;font-size:10px;color:var(--turquesa);letter-spacing:2px;text-transform:uppercase;">Papelaria Criativa</div>
 <div class="preview-titulo">ORÇAMENTO</div>
 <div style="font-size:12px;color:var(--cinza);margin-bottom:10px;">
-Cliente: <strong id="p-cliente" style="color:var(--rosa-escuro);">—</strong><br>
-Empresa: <strong id="p-empresa" style="color:var(--rosa-escuro);">—</strong>
+Cliente: <strong id="p-cliente" style="color:var(--rosa-escuro);">${esc(camposBot.cliente || '—')}</strong><br>
+${camposBot.contato ? `Contato: <strong style="color:var(--rosa-escuro);">${esc(camposBot.contato)}</strong><br>` : ''}
+${camposBot.empresa ? `Empresa: <strong id="p-empresa" style="color:var(--rosa-escuro);">${esc(camposBot.empresa)}</strong><br>` : ''}
+${camposBot.tema ? `Tema: <strong style="color:var(--rosa-escuro);">${esc(camposBot.tema)}</strong>` : ''}
 </div>
 <table>
 <thead><tr><th>Item</th><th>Qtd</th><th style="text-align:right">Unit.</th><th style="text-align:right">Total</th></tr></thead>
 <tbody id="p-itens">${
 itensOrcamento.length === 0 ? '<tr><td colspan="4" style="text-align:center;color:var(--cinza);padding:20px;">Adicione produtos</td></tr>' :
-itensOrcamento.map(i => `<tr><td>${esc(i.nome)}</td><td>${i.qtd}</td><td style="text-align:right">R$ ${formatarMoeda(i.valor)}</td><td style="text-align:right">R$ ${formatarMoeda(Number(i.valor)*Number(i.qtd))}</td></tr>`).join('')
+itensOrcamento.map(i => `<tr><td>${esc(i.nome)}${i.descricao ? `<div style="font-size:10px;color:var(--cinza);">${esc(i.descricao)}</div>` : ''}</td><td>${i.qtd}</td><td style="text-align:right">R$ ${formatarMoeda(i.valor)}</td><td style="text-align:right">R$ ${formatarMoeda(Number(i.valor)*Number(i.qtd))}</td></tr>`).join('')
 }</tbody>
 </table>
+${desc.valorDesconto > 0 ? `
+<div class="preview-total" style="border-bottom:1px dashed var(--borda);padding:6px 0;font-size:13px;font-weight:400;">
+<span>Subtotal</span><span>R$ ${formatarMoeda(subtotal)}</span>
+</div>
+${desc.cupomPct > 0 ? `<div class="linha-pgto" style="color:var(--verde);"><span>Cupom ${esc(cupomAtual)} (${desc.cupomPct}%)</span><span>− R$ ${formatarMoeda(subtotal * desc.cupomPct / 100)}</span></div>` : ''}
+${desc.pixPct > 0 ? `<div class="linha-pgto" style="color:var(--verde);"><span>Pix (${desc.pixPct}%)</span><span>− R$ ${formatarMoeda(subtotal * desc.pixPct / 100)}</span></div>` : ''}
+` : ''}
 <div class="preview-total"><span>Total</span><span id="p-total">R$ ${formatarMoeda(total)}</span></div>
 <div class="preview-pagamento" id="p-pagamento">
-${renderBlocoPagamento(total, totalPix)}
+${renderBlocoPagamento(subtotal, total)}
 </div>
-<div style="font-size:11px;color:var(--cinza);margin-top:8px;">Prazo de entrega: <span id="p-prazo">4</span> dias úteis após aprovação</div>
+${camposBot.prazoDias ? `<div style="font-size:11px;color:var(--cinza);margin-top:8px;">Prazo de entrega: <span id="p-prazo">${esc(camposBot.prazoDias)}</span> dias úteis após aprovação</div>` : ''}
 <div style="text-align:center;font-size:10px;color:var(--cinza);margin-top:14px;">Brasília, ${new Date().toLocaleDateString('pt-BR')}</div>
 </div>
 <div style="display:flex;gap:8px;margin-top:12px;">
 <button class="btn-secundario" style="flex:1" onclick="gerarPDF()">📄 Baixar PDF</button>
-<button class="btn-primario" style="flex:1" onclick="salvarOrcamento()">💾 Salvar orçamento</button>
+<button class="btn-primario" style="flex:1" onclick="salvarOrcamento()">${orcamentoEditando ? '💾 Atualizar orçamento' : '💾 Salvar orçamento'}</button>
 </div>
 </div>
 </div>`;
 }
 
 async function salvarOrcamento() {
-if (itensOrcamento.length === 0) { toast('Adicione pelo menos um produto'); return; }
-const cliente = (document.getElementById('bot-cliente')?.value || '').trim();
-const empresa = (document.getElementById('bot-empresa')?.value || '').trim();
-const tema = (document.getElementById('bot-tema')?.value || '').trim();
-const prazoDias = Number(document.getElementById('bot-prazo')?.value || 4);
+if (itensOrcamento.length === 0) { toast('Adicione pelo menos um item'); return; }
+const cliente = (camposBot.cliente || '').trim();
 if (!cliente) { toast('Selecione um cliente antes de salvar.'); return; }
 
 const subtotal = itensOrcamento.reduce((s, i) => s + (Number(i.valor) * Number(i.qtd)), 0);
-// Aplica desconto/acréscimo conforme forma de pagamento atual
-let totalFinal = subtotal;
-if (formaPagamentoAtual === 'pix') totalFinal = subtotal * (1 - DESCONTO_PIX);
-// Cartão: sem acréscimo automático aqui (depende da maquininha) — fica subtotal mesmo
+const desc = calcularDescontos(subtotal);
+const totalFinal = Math.max(0, subtotal - desc.valorDesconto);
 
 const descricao = itensOrcamento.map(i => `${i.qtd}x ${i.nome}`).join(' · ');
-const observacao = formaPagamentoAtual === 'pix'
-  ? 'Pgto: Pix (5% off)'
-  : formaPagamentoAtual === 'cartao'
-  ? 'Pgto: Cartão (sujeito a acréscimo)'
-  : '';
+const partesObs = [];
+if (camposBot.contato) partesObs.push(`Contato: ${camposBot.contato}`);
+if (formaPagamentoAtual === 'pix') partesObs.push(`Pgto: Pix (${desc.pixPct}% off)`);
+else if (formaPagamentoAtual === 'cartao') partesObs.push('Pgto: Cartão');
+if (desc.cupomPct > 0) partesObs.push(`Cupom: ${cupomAtual}`);
+
+// dadosCompletos = "fotografia" do orçamento, pra poder reabrir/regerar PDF idêntico
+const dadosCompletos = JSON.stringify({
+contato: camposBot.contato || '',
+itens: itensOrcamento,
+formaPagamento: formaPagamentoAtual,
+descontoPixPct: descontoPixAtual,
+cupom: cupomAtual,
+subtotal: Number(subtotal.toFixed(2)),
+totalDesconto: Number(desc.valorDesconto.toFixed(2))
+});
 
 const dadosPedido = {
 data: formatarDataISO(new Date()),
 cliente,
-empresa,
-tema,
+empresa: camposBot.empresa || '',
+tema: camposBot.tema || '',
 descricao,
 total: totalFinal.toFixed(2),
-prazoDias: String(prazoDias),
+prazoDias: String(camposBot.prazoDias || ''),
 prazoEntrega: '',
-status: STATUS_PEDIDOS.ORCAMENTO,
-obs: observacao
+status: orcamentoEditando ? (orcamentoEditando.status || STATUS_PEDIDOS.ORCAMENTO) : STATUS_PEDIDOS.ORCAMENTO,
+obs: partesObs.join(' · '),
+dadosCompletos
 };
 
-const ok = await enviarPost({ acao: 'adicionar', aba: 'pedidos', dados: dadosPedido });
+let ok;
+if (orcamentoEditando) {
+ok = await enviarPost({ acao: 'atualizar', aba: 'pedidos', linhaId: orcamentoEditando.linhaId, dados: dadosPedido });
+} else {
+ok = await enviarPost({ acao: 'adicionar', aba: 'pedidos', dados: dadosPedido });
+}
+
 if (ok) {
-toast('Orçamento salvo. Veja na aba Orçamentos.');
-itensOrcamento = [];
-formaPagamentoAtual = null;
+toast(orcamentoEditando ? 'Orçamento atualizado.' : 'Orçamento salvo. Veja na aba Orçamentos.');
+cancelarEdicaoBot();
 await recarregarAba('pedidos');
-renderizarAba('bot');
 }
 }
 
-function renderBlocoPagamento(total, totalPix) {
-if (formaPagamentoAtual === null) {
-// Sem forma especificada — não renderiza nada no preview
-return '';
-}
+function renderBlocoPagamento(subtotal, totalFinal) {
+if (formaPagamentoAtual === null) return '';
 if (formaPagamentoAtual === 'pix') {
-return `
-<div class="linha-pgto"><span>Forma de pagamento</span><strong>Pix</strong></div>
-<div class="linha-pgto"><span>Valor à vista</span><span>R$ ${formatarMoeda(total)}</span></div>
-<div class="linha-pgto destaque-pix"><span>Valor com Pix (5% off)</span><span>R$ ${formatarMoeda(totalPix)}</span></div>
-`;
+return `<div class="linha-pgto"><span>Forma de pagamento</span><strong>Pix</strong></div>`;
 }
 return `
 <div class="linha-pgto"><span>Forma de pagamento</span><strong>Cartão de crédito</strong></div>
-<div class="linha-pgto"><span>Valor</span><span>R$ ${formatarMoeda(total)}</span></div>
 <div class="obs-cartao">* Valor sujeito a acréscimo conforme taxa da maquininha</div>
 `;
 }
@@ -916,17 +1041,37 @@ formaPagamentoAtual = forma;
 renderizarAba('bot');
 }
 
-function adicionarItemOrcamento(idx) {
-if (idx === '') return;
-const p = dados.produtos[Number(idx)];
+// Aceita "produto:5" ou "material:3" (fonte:índice)
+function adicionarItemBot(value) {
+if (!value) return;
+const [fonte, idxStr] = String(value).split(':');
+const idx = Number(idxStr);
+if (fonte === 'produto') {
+const p = dados.produtos[idx];
 if (!p) return;
-itensOrcamento.push({ nome: p.nome, valor: Number(p.valor || 0), qtd: 1 });
+itensOrcamento.push({ nome: p.nome, valor: Number(p.valor || 0), qtd: 1, descricao: '', fonte: 'produto' });
+} else if (fonte === 'material') {
+const m = dados.materiais[idx];
+if (!m) return;
+// Default: valor unitário = custo do material. Usuária edita pra preço final.
+itensOrcamento.push({ nome: m.nome, valor: Number(m.custo || 0), qtd: 1, descricao: '', fonte: 'material' });
+}
 renderizarAba('bot');
 }
 
 function ajustarQtd(idx, qtd) {
-itensOrcamento[idx].qtd = Number(qtd);
+itensOrcamento[idx].qtd = Number(qtd) || 0;
 renderizarAba('bot');
+}
+
+function ajustarValor(idx, valor) {
+itensOrcamento[idx].valor = Number(valor) || 0;
+renderizarAba('bot');
+}
+
+function ajustarDescricao(idx, descricao) {
+itensOrcamento[idx].descricao = String(descricao || '').trim();
+// Não re-renderiza: textarea preserva foco. Só atualiza dado.
 }
 
 function removerItem(idx) {
@@ -934,22 +1079,82 @@ itensOrcamento.splice(idx, 1);
 renderizarAba('bot');
 }
 
-function atualizarPreview() {
-const c = document.getElementById('bot-cliente')?.value || '—';
-const e = document.getElementById('bot-empresa')?.value || '—';
-const p = document.getElementById('bot-prazo')?.value || '4';
-if (document.getElementById('p-cliente')) document.getElementById('p-cliente').textContent = c;
-if (document.getElementById('p-empresa')) document.getElementById('p-empresa').textContent = e;
-if (document.getElementById('p-prazo')) document.getElementById('p-prazo').textContent = p;
+// Auto-preenche o Contato com o telefone do cliente selecionado
+function onClienteBotChange() {
+const nome = document.getElementById('bot-cliente').value;
+camposBot.cliente = nome;
+const c = dados.clientes.find(x => String(x.nome).trim() === String(nome).trim());
+if (c && !camposBot.contato) {
+camposBot.contato = c.telefone || c.email || '';
+}
+renderizarAba('bot');
 }
 
+function cancelarEdicaoBot() {
+orcamentoEditando = null;
+itensOrcamento = [];
+camposBot = { cliente: '', contato: '', empresa: '', tema: '', prazoDias: '4' };
+formaPagamentoAtual = null;
+cupomAtual = '';
+descontoPixAtual = 5;
+renderizarAba('bot');
+}
+
+// Valida "papele10" → retorna 10 (porcentagem). Inválido → null
+function parsearCupom(c) {
+const m = String(c || '').trim().toLowerCase().match(/^papele(\d+(?:\.\d+)?)$/);
+return m ? Number(m[1]) : null;
+}
+
+function calcularDescontos(subtotal) {
+const cupomPct = parsearCupom(cupomAtual) || 0;
+const pixPct = formaPagamentoAtual === 'pix' ? Number(descontoPixAtual || 0) : 0;
+const totalPct = Math.min(100, cupomPct + pixPct);
+return {
+cupomPct, pixPct, totalPct,
+valorDesconto: subtotal * (totalPct / 100)
+};
+}
+
+function atualizarPreview() {
+// Pra reflexão imediata de campos textuais, re-renderiza Bot
+// (estado é mantido em camposBot, então campos não perdem valores)
+renderizarAba('bot');
+}
+
+// Usa o estado atual do Bot (campos + itens + descontos)
 async function gerarPDF() {
 if (itensOrcamento.length === 0) { toast('Adicione pelo menos um produto'); return; }
+return gerarPDFComDados({
+cliente: camposBot.cliente,
+contato: camposBot.contato,
+empresa: camposBot.empresa,
+tema: camposBot.tema,
+prazoDias: camposBot.prazoDias,
+itens: itensOrcamento,
+formaPagamento: formaPagamentoAtual,
+descontoPixPct: descontoPixAtual,
+cupom: cupomAtual,
+});
+}
 
-const cliente = document.getElementById('bot-cliente')?.value || '';
-const empresa = document.getElementById('bot-empresa')?.value || '';
-const tema = document.getElementById('bot-tema')?.value || '';
-const prazo = document.getElementById('bot-prazo')?.value || '4';
+// Função de geração reutilizável — recebe um objeto com TUDO que vai no PDF
+async function gerarPDFComDados(d) {
+const cliente = d.cliente || '';
+const contato = d.contato || '';
+const empresa = d.empresa || '';
+const tema = d.tema || '';
+const prazo = d.prazoDias || '';
+const itens = d.itens || [];
+const formaPgto = d.formaPagamento; // 'pix' | 'cartao' | null
+const pixPct = formaPgto === 'pix' ? Number(d.descontoPixPct || 0) : 0;
+const cupomPct = parsearCupom(d.cupom) || 0;
+const totalPctDesc = Math.min(100, pixPct + cupomPct);
+
+const subtotal = itens.reduce((s, i) => s + (Number(i.valor) * Number(i.qtd)), 0);
+const descPix = subtotal * pixPct / 100;
+const descCupom = subtotal * cupomPct / 100;
+const total = Math.max(0, subtotal - descPix - descCupom);
 
 const { jsPDF } = window.jspdf;
 const doc = new jsPDF();
@@ -976,57 +1181,81 @@ doc.text('ORÇAMENTO', 105, 50, { align: 'center' });
 
 doc.setFontSize(11);
 doc.setFont('helvetica', 'normal');
+doc.setTextColor(60, 60, 60);
 let y = 64;
 if (cliente) { doc.text(`Cliente: ${cliente}`, 20, y); y += 7; }
+if (contato) { doc.text(`Contato: ${contato}`, 20, y); y += 7; }
 if (empresa) { doc.text(`Empresa: ${empresa}`, 20, y); y += 7; }
 if (tema) { doc.text(`Tema: ${tema}`, 20, y); y += 7; }
 
-const total = itensOrcamento.reduce((s, i) => s + (Number(i.valor) * Number(i.qtd)), 0);
-const totalPix = total * (1 - DESCONTO_PIX);
-
+// Tabela de itens — agora item + descrição vão na mesma célula com quebra
 doc.autoTable({
 startY: y + 5,
-head: [['Item', 'Quantidade', 'Valor unit.', 'Total']],
-body: itensOrcamento.map(i => [
-i.nome, i.qtd,
+head: [['Item', 'Qtd', 'Valor unit.', 'Total']],
+body: itens.map(i => [
+i.descricao ? `${i.nome}\n${i.descricao}` : i.nome,
+String(i.qtd),
 `R$ ${formatarMoeda(i.valor)}`,
 `R$ ${formatarMoeda(Number(i.valor) * Number(i.qtd))}`
 ]),
-foot: [['', '', 'Total:', `R$ ${formatarMoeda(total)}`]],
+foot: totalPctDesc > 0
+? [['', '', 'Subtotal:', `R$ ${formatarMoeda(subtotal)}`]]
+: [['', '', 'Total:', `R$ ${formatarMoeda(total)}`]],
 headStyles: { fillColor: [255, 245, 249], textColor: [75, 21, 40] },
-footStyles: { fillColor: [224, 74, 135], textColor: [255, 255, 255] },
-styles: { fontSize: 10 }
+footStyles: { fillColor: totalPctDesc > 0 ? [255, 245, 249] : [224, 74, 135], textColor: totalPctDesc > 0 ? [75, 21, 40] : [255, 255, 255] },
+styles: { fontSize: 10, valign: 'top' },
+columnStyles: { 0: { cellWidth: 90 }, 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' } }
 });
 
-let yFim = doc.lastAutoTable.finalY + 10;
+let yFim = doc.lastAutoTable.finalY + 6;
 
-// Bloco de forma de pagamento — só desenha se uma forma estiver especificada
-if (formaPagamentoAtual !== null) {
+// Quebra de descontos (se houver)
+if (totalPctDesc > 0) {
+doc.setFontSize(10);
+doc.setFont('helvetica', 'normal');
+doc.setTextColor(45, 122, 62);
+if (cupomPct > 0) {
+doc.text(`Cupom ${d.cupom} (${cupomPct}%):`, 110, yFim);
+doc.text(`− R$ ${formatarMoeda(descCupom)}`, 190, yFim, { align: 'right' });
+yFim += 6;
+}
+if (pixPct > 0) {
+doc.text(`Desconto Pix (${pixPct}%):`, 110, yFim);
+doc.text(`− R$ ${formatarMoeda(descPix)}`, 190, yFim, { align: 'right' });
+yFim += 6;
+}
+// Total final
+doc.setFontSize(11);
+doc.setFont('helvetica', 'bold');
+doc.setFillColor(224, 74, 135);
+doc.rect(110, yFim, 80, 9, 'F');
+doc.setTextColor(255, 255, 255);
+doc.text('Total final:', 113, yFim + 6);
+doc.text(`R$ ${formatarMoeda(total)}`, 188, yFim + 6, { align: 'right' });
+yFim += 14;
+}
+
+yFim += 4;
+
+// Bloco da forma de pagamento (texto curto)
+if (formaPgto !== null) {
 doc.setFillColor(255, 245, 249);
-doc.rect(20, yFim, 170, formaPagamentoAtual === 'pix' ? 26 : 22, 'F');
-
+doc.rect(20, yFim, 170, formaPgto === 'cartao' ? 22 : 16, 'F');
 doc.setFontSize(10);
 doc.setFont('helvetica', 'bold');
 doc.setTextColor(75, 21, 40);
-doc.text('Forma de pagamento', 25, yFim + 7);
-
+doc.text('Forma de pagamento:', 25, yFim + 7);
 doc.setFont('helvetica', 'normal');
 doc.setTextColor(60, 60, 60);
-
-if (formaPagamentoAtual === 'pix') {
-doc.text('Pix', 25, yFim + 14);
-doc.text(`Valor à vista: R$ ${formatarMoeda(total)}`, 25, yFim + 20);
-doc.setFont('helvetica', 'bold');
-doc.setTextColor(45, 122, 62);
-doc.text(`Valor com Pix (5% off): R$ ${formatarMoeda(totalPix)}`, 105, yFim + 20);
-yFim += 30;
+if (formaPgto === 'pix') {
+doc.text('Pix', 80, yFim + 7);
+yFim += 20;
 } else {
-doc.text('Cartão de crédito', 25, yFim + 14);
-doc.text(`Valor: R$ ${formatarMoeda(total)}`, 105, yFim + 14);
+doc.text('Cartão de crédito', 80, yFim + 7);
 doc.setFontSize(8);
 doc.setTextColor(120, 120, 120);
 doc.setFont('helvetica', 'italic');
-doc.text('* Valor sujeito a acréscimo conforme taxa da maquininha', 25, yFim + 20);
+doc.text('* Valor sujeito a acréscimo conforme taxa da maquininha', 25, yFim + 14);
 yFim += 26;
 }
 }
@@ -1034,11 +1263,14 @@ yFim += 26;
 doc.setFont('helvetica', 'normal');
 doc.setFontSize(10);
 doc.setTextColor(60, 60, 60);
+if (prazo) {
 doc.text(`Prazo de entrega: ${prazo} dias úteis após aprovação`, 20, yFim);
+yFim += 6;
+}
 
 doc.setFontSize(9);
 doc.setTextColor(120, 120, 120);
-doc.text(`Brasília, ${new Date().toLocaleDateString('pt-BR')}`, 105, yFim + 15, { align: 'center' });
+doc.text(`Brasília, ${new Date().toLocaleDateString('pt-BR')}`, 105, yFim + 12, { align: 'center' });
 
 doc.save(`orcamento-${(cliente || 'papele').toLowerCase().replace(/\s+/g, '-')}-${Date.now()}.pdf`);
 toast('PDF baixado!');
