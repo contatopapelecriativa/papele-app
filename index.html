@@ -189,7 +189,6 @@ data-callback="handleCredentialResponse"></div>
 <button class="ativo" data-aba="clientes" onclick="mudarAba('clientes')">Clientes</button>
 <button data-aba="materiais" onclick="mudarAba('materiais')">Materiais</button>
 <button data-aba="produtos" onclick="mudarAba('produtos')">Produtos</button>
-<button data-aba="estoque" onclick="mudarAba('estoque')">Estoque</button>
 <button data-aba="orcamentos" onclick="mudarAba('orcamentos')">Orçamentos</button>
 <button data-aba="pedidos" onclick="mudarAba('pedidos')">Pedidos</button>
 <button data-aba="caixa" onclick="mudarAba('caixa')">Caixa</button>
@@ -228,9 +227,8 @@ let filtroPedidos = 'aprovados';    // aprovados | producao | entregues | todos
 
 const CAMPOS = {
 clientes: ['nome', 'telefone', 'email', 'documento', 'origem', 'endereco', 'primeiroContato', 'aniversario', 'obs'],
-materiais: ['nome', 'categoria', 'unidade', 'custo', 'fornecedor', 'obs'],
+materiais: ['nome', 'categoria', 'unidade', 'custo', 'fornecedor', 'quantidade', 'minimo', 'obs'],
 produtos: ['nome', 'categoria', 'unidade', 'valor', 'descricao', 'maoObra', 'outrosCustos', 'margemPct'],
-estoque: ['nome', 'categoria', 'unidade', 'quantidade', 'minimo', 'obs'],
 caixa: ['data', 'tipo', 'descricao', 'categoria', 'valor', 'pagamento', 'obs'],
 pedidos: ['data', 'cliente', 'empresa', 'tema', 'descricao', 'total', 'prazoDias', 'prazoEntrega', 'status', 'obs']
 };
@@ -349,7 +347,6 @@ const c = document.getElementById('conteudo');
 if (aba === 'clientes') c.innerHTML = renderClientes();
 else if (aba === 'materiais') c.innerHTML = renderMateriais();
 else if (aba === 'produtos') c.innerHTML = renderProdutos();
-else if (aba === 'estoque') c.innerHTML = renderEstoque();
 else if (aba === 'orcamentos') c.innerHTML = renderOrcamentos();
 else if (aba === 'pedidos') c.innerHTML = renderPedidos();
 else if (aba === 'caixa') c.innerHTML = renderCaixa();
@@ -388,26 +385,33 @@ ${l.length === 0 ? '<div class="vazio">Nenhum cliente ainda.</div>' : `
 // ========================================================
 function renderMateriais() {
 const l = dados.materiais;
+const baixo = l.filter(m => Number(m.quantidade) <= Number(m.minimo || 0));
 return `
 <div class="cabecalho-aba">
-<div><h2>Materiais</h2><p>${l.length} cadastrados</p></div>
+<div><h2>Materiais</h2><p>${l.length} cadastrados${baixo.length > 0 ? ` · <span style="color:var(--vermelho)">${baixo.length} em baixa</span>` : ''}</p></div>
 <button class="btn-primario" onclick="abrirModalGenerico('materiais')">+ Novo material</button>
 </div>
 ${l.length === 0 ? '<div class="vazio">Nenhum material ainda.</div>' : `
 <div class="tabela-wrap"><table class="dados">
-<thead><tr><th>Nome</th><th>Categoria</th><th>Unidade</th><th>Custo</th><th>Fornecedor</th><th></th></tr></thead>
-<tbody>${l.map(m => `
+<thead><tr><th>Nome</th><th>Categoria</th><th>Unidade</th><th>Custo</th><th>Fornecedor</th><th>Quantidade</th><th>Mínimo</th><th>Status</th><th></th></tr></thead>
+<tbody>${l.map(m => {
+const b = Number(m.quantidade) <= Number(m.minimo || 0);
+return `
 <tr>
 <td><strong>${esc(m.nome)}</strong></td>
 <td>${esc(m.categoria || '-')}</td>
 <td>${esc(m.unidade || '-')}</td>
 <td>R$ ${formatarMoeda(m.custo)}</td>
 <td>${esc(m.fornecedor || '-')}</td>
+<td>${m.quantidade != null && m.quantidade !== '' ? m.quantidade : '-'}</td>
+<td>${m.minimo != null && m.minimo !== '' ? m.minimo : '-'}</td>
+<td>${b ? '<span style="color:var(--vermelho)">⚠ Repor</span>' : '<span style="color:var(--verde)">OK</span>'}</td>
 <td class="acoes">
 <button class="btn-acao" onclick='editar("materiais", ${m._linha})'>✎</button>
 <button class="btn-acao" onclick='excluir("materiais", ${m._linha})'>🗑</button>
 </td>
-</tr>`).join('')}</tbody>
+</tr>`;
+}).join('')}</tbody>
 </table></div>`}`;
 }
 
@@ -469,39 +473,6 @@ margemPctPadrao: Number(document.getElementById('cfg-margem').value || 0)
 };
 const ok = await enviarPost({ acao: 'salvarConfiguracoes', dados: novaCfg });
 if (ok) { dados.configuracoes = novaCfg; toast('Padrões salvos'); }
-}
-
-// ========================================================
-// ABA: ESTOQUE
-// ========================================================
-function renderEstoque() {
-const l = dados.estoque;
-const baixo = l.filter(e => Number(e.quantidade) <= Number(e.minimo || 0));
-return `
-<div class="cabecalho-aba">
-<div><h2>Estoque</h2><p>${l.length} itens${baixo.length > 0 ? ` · <span style="color:var(--vermelho)">${baixo.length} em baixa</span>` : ''}</p></div>
-<button class="btn-primario" onclick="abrirModalGenerico('estoque')">+ Novo item</button>
-</div>
-${l.length === 0 ? '<div class="vazio">Nenhum item no estoque.</div>' : `
-<div class="tabela-wrap"><table class="dados">
-<thead><tr><th>Nome</th><th>Categoria</th><th>Unidade</th><th>Quantidade</th><th>Mínimo</th><th>Status</th><th></th></tr></thead>
-<tbody>${l.map(e => {
-const b = Number(e.quantidade) <= Number(e.minimo || 0);
-return `
-<tr>
-<td><strong>${esc(e.nome)}</strong></td>
-<td>${esc(e.categoria || '-')}</td>
-<td>${esc(e.unidade || '-')}</td>
-<td>${e.quantidade || 0}</td>
-<td>${e.minimo || 0}</td>
-<td>${b ? '<span style="color:var(--vermelho)">⚠ Repor</span>' : '<span style="color:var(--verde)">OK</span>'}</td>
-<td class="acoes">
-<button class="btn-acao" onclick='editar("estoque", ${e._linha})'>✎</button>
-<button class="btn-acao" onclick='excluir("estoque", ${e._linha})'>🗑</button>
-</td>
-</tr>`;
-}).join('')}</tbody>
-</table></div>`}`;
 }
 
 // ========================================================
