@@ -191,6 +191,7 @@ data-callback="handleCredentialResponse"></div>
 <button data-aba="produtos" onclick="mudarAba('produtos')">Produtos</button>
 <button data-aba="orcamentos" onclick="mudarAba('orcamentos')">Orçamentos</button>
 <button data-aba="pedidos" onclick="mudarAba('pedidos')">Pedidos</button>
+<button data-aba="fidelidade" onclick="mudarAba('fidelidade')">Fidelidade</button>
 <button data-aba="caixa" onclick="mudarAba('caixa')">Caixa</button>
 <button class="destaque" data-aba="bot" onclick="mudarAba('bot')">Bot orçamento</button>
 </nav>
@@ -221,6 +222,11 @@ let materiaisProdutoAtual = [];
 let formaPagamentoAtual = null; // null = não especificar (default), 'pix' ou 'cartao'
 let filtroOrcamentos = 'pendentes'; // pendentes | recusados | todos
 let filtroPedidos = 'aprovados';    // aprovados | producao | entregues | todos
+let filtroFidelidade = 'todos';     // todos | vips | ativos | inativos
+
+// Critérios de classificação de clientes
+const FIDELIDADE_VIP_MIN_PEDIDOS = 5;
+const FIDELIDADE_INATIVO_DIAS = 90;
 
 // Estado do Bot de orçamento
 let camposBot = { cliente: '', contato: '', empresa: '', tema: '', prazoDias: '4' };
@@ -352,6 +358,7 @@ else if (aba === 'materiais') c.innerHTML = renderMateriais();
 else if (aba === 'produtos') c.innerHTML = renderProdutos();
 else if (aba === 'orcamentos') c.innerHTML = renderOrcamentos();
 else if (aba === 'pedidos') c.innerHTML = renderPedidos();
+else if (aba === 'fidelidade') c.innerHTML = renderFidelidade();
 else if (aba === 'caixa') c.innerHTML = renderCaixa();
 else if (aba === 'bot') c.innerHTML = renderBot();
 }
@@ -476,6 +483,222 @@ margemPctPadrao: Number(document.getElementById('cfg-margem').value || 0)
 };
 const ok = await enviarPost({ acao: 'salvarConfiguracoes', dados: novaCfg });
 if (ok) { dados.configuracoes = novaCfg; toast('Padrões salvos'); }
+}
+
+// ========================================================
+// ABA: FIDELIDADE (CRM lite — agrega pedidos aprovados por cliente)
+// ========================================================
+
+// Status que contam como "pedido fechado"
+const STATUS_FIDELIDADE = ['Aprovado', 'Em produção', 'Entregue'];
+
+function calcularFidelidade() {
+const pedidosFechados = (dados.pedidos || []).filter(p => STATUS_FIDELIDADE.indexOf(p.status) !== -1);
+const agora = new Date(); agora.setHours(0,0,0,0);
+
+// Agrupa pedidos por nome de cliente
+const porCliente = {};
+pedidosFechados.forEach(p => {
+const nome = String(p.cliente || '').trim();
+if (!nome) return;
+if (!porCliente[nome]) {
+porCliente[nome] = { nome, pedidos: [], totalGasto: 0, ultimoPedido: null };
+}
+porCliente[nome].pedidos.push(p);
+porCliente[nome].totalGasto += Number(p.total) || 0;
+const dataPedido = parseDataBR(p.data);
+if (dataPedido && (!porCliente[nome].ultimoPedido || dataPedido > porCliente[nome].ultimoPedido)) {
+porCliente[nome].ultimoPedido = dataPedido;
+}
+});
+
+// Enriquece com dados do cadastro do cliente + classificação
+return Object.values(porCliente).map(c => {
+const cad = dados.clientes.find(x => String(x.nome).trim() === c.nome);
+const diasUltimo = c.ultimoPedido ? Math.floor((agora - c.ultimoPedido) / 86400000) : null;
+let classificacao;
+if (c.pedidos.length >= FIDELIDADE_VIP_MIN_PEDIDOS) classificacao = 'VIP';
+else if (diasUltimo == null || diasUltimo > FIDELIDADE_INATIVO_DIAS) classificacao = 'Inativo';
+else classificacao = 'Ativo';
+return {
+...c,
+telefone: cad?.telefone || '',
+email: cad?.email || '',
+diasUltimo,
+classificacao
+};
+});
+}
+
+function renderFidelidade() {
+let clientes = calcularFidelidade();
+const totalClientesFidelizados = clientes.length;
+const vips = clientes.filter(c => c.classificacao === 'VIP').length;
+const ativos = clientes.filter(c => c.classificacao === 'Ativo').length;
+const inativos = clientes.filter(c => c.classificacao === 'Inativo').length;
+const receitaTotal = clientes.reduce((s, c) => s + c.totalGasto, 0);
+
+// Filtro
+if (filtroFidelidade === 'vips') clientes = clientes.filter(c => c.classificacao === 'VIP');
+else if (filtroFidelidade === 'ativos') clientes = clientes.filter(c => c.classificacao === 'Ativo');
+else if (filtroFidelidade === 'inativos') clientes = clientes.filter(c => c.classificacao === 'Inativo');
+
+// Ordena por total gasto descendente (clientes mais valiosos no topo)
+clientes.sort((a, b) => b.totalGasto - a.totalGasto);
+
+return `
+<div class="cabecalho-aba">
+<div>
+<h2>Fidelidade</h2>
+<p>${totalClientesFidelizados} cliente(s) com pedido fechado · Receita total: <strong>R$ ${formatarMoeda(receitaTotal)}</strong></p>
+</div>
+</div>
+
+<div class="stats-grid">
+<div class="stat-card"><div class="stat-label">VIPs</div><div class="stat-valor verde">${vips}</div></div>
+<div class="stat-card"><div class="stat-label">Ativos</div><div class="stat-valor">${ativos}</div></div>
+<div class="stat-card"><div class="stat-label">Inativos</div><div class="stat-valor ${inativos>0?'vermelho':''}">${inativos}</div></div>
+<div class="stat-card"><div class="stat-label">Total gasto</div><div class="stat-valor">R$ ${formatarMoeda(receitaTotal)}</div></div>
+</div>
+
+<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;">
+<button class="chip-filtro ${filtroFidelidade === 'todos' ? 'ativo' : ''}" onclick="filtrarFidelidade('todos')">Todos</button>
+<button class="chip-filtro ${filtroFidelidade === 'vips' ? 'ativo' : ''}" onclick="filtrarFidelidade('vips')">VIPs (${FIDELIDADE_VIP_MIN_PEDIDOS}+ pedidos)</button>
+<button class="chip-filtro ${filtroFidelidade === 'ativos' ? 'ativo' : ''}" onclick="filtrarFidelidade('ativos')">Ativos</button>
+<button class="chip-filtro ${filtroFidelidade === 'inativos' ? 'ativo' : ''}" onclick="filtrarFidelidade('inativos')">Inativos (${FIDELIDADE_INATIVO_DIAS}+ dias sem comprar)</button>
+</div>
+
+${clientes.length === 0 ? `<div class="vazio">Nenhum cliente nesse filtro.</div>` : `
+<div class="tabela-wrap"><table class="dados">
+<thead>
+<tr>
+<th>Cliente</th>
+<th>Pedidos</th>
+<th>Total gasto</th>
+<th>Último pedido</th>
+<th>Classificação</th>
+<th></th>
+</tr>
+</thead>
+<tbody>${clientes.map(c => {
+const corClass = corDaClassificacao(c.classificacao);
+const ultimoTxt = c.ultimoPedido
+? `${c.ultimoPedido.toLocaleDateString('pt-BR')} <div style="font-size:11px;color:var(--cinza);">${c.diasUltimo === 0 ? 'hoje' : `${c.diasUltimo} dia${c.diasUltimo !== 1 ? 's' : ''} atrás`}</div>`
+: '—';
+const whatsappUrl = c.telefone ? `https://wa.me/55${String(c.telefone).replace(/\D/g, '')}` : null;
+return `
+<tr>
+<td>
+<strong>${esc(c.nome)}</strong>
+${c.telefone ? `<div style="font-size:11px;color:var(--cinza);margin-top:2px;">${esc(c.telefone)}</div>` : ''}
+</td>
+<td>${c.pedidos.length}</td>
+<td><strong>R$ ${formatarMoeda(c.totalGasto)}</strong></td>
+<td>${ultimoTxt}</td>
+<td><span class="badge-status" style="background:${corClass.bg};color:${corClass.fg};">${c.classificacao}</span></td>
+<td class="acoes" style="white-space:nowrap;">
+<button class="btn-acao" title="Ver histórico de pedidos" onclick='abrirHistoricoCliente("${esc(c.nome)}")'>📜 Histórico</button>
+${whatsappUrl ? `<a href="${whatsappUrl}" target="_blank" class="btn-acao" style="text-decoration:none;display:inline-block;" title="Abrir conversa no WhatsApp">💬 WhatsApp</a>` : ''}
+</td>
+</tr>`;
+}).join('')}</tbody>
+</table></div>`}`;
+}
+
+function filtrarFidelidade(f) { filtroFidelidade = f; renderizarAba('fidelidade'); }
+
+function corDaClassificacao(c) {
+switch (c) {
+case 'VIP':     return { bg: '#FFF4D6', fg: '#7A5A00' };
+case 'Ativo':   return { bg: '#E8F5EA', fg: '#1F5C2E' };
+case 'Inativo': return { bg: '#F5E5E5', fg: '#7A1B1B' };
+default: return { bg: '#F5F5F5', fg: '#333' };
+}
+}
+
+function abrirHistoricoCliente(nome) {
+const todos = (dados.pedidos || [])
+.filter(p => String(p.cliente || '').trim() === nome && STATUS_FIDELIDADE.indexOf(p.status) !== -1)
+.sort((a, b) => String(b.data || '').localeCompare(String(a.data || '')));
+
+if (todos.length === 0) { toast('Sem pedidos pra esse cliente.'); return; }
+
+const totalGasto = todos.reduce((s, p) => s + (Number(p.total) || 0), 0);
+const cad = dados.clientes.find(x => String(x.nome).trim() === nome);
+
+// Conta produtos mais comprados a partir do dadosCompletos.itens
+const contagemProdutos = {};
+todos.forEach(p => {
+let extra = {};
+try { extra = JSON.parse(p.dadosCompletos || '{}'); } catch(e) {}
+(extra.itens || []).forEach(it => {
+const k = String(it.nome).trim();
+if (!k) return;
+if (!contagemProdutos[k]) contagemProdutos[k] = { qtd: 0, valor: 0 };
+contagemProdutos[k].qtd += Number(it.qtd) || 0;
+contagemProdutos[k].valor += (Number(it.valor) || 0) * (Number(it.qtd) || 0);
+});
+});
+const top3 = Object.entries(contagemProdutos)
+.sort((a, b) => b[1].qtd - a[1].qtd)
+.slice(0, 3);
+
+const html = `
+<div class="modal-fundo" id="modal-fundo" onclick="if(event.target===this) fecharModal()">
+<div class="modal" style="max-width:720px;">
+<h3>Histórico — ${esc(nome)}</h3>
+<div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 16px;font-size:12px;color:var(--cinza);">
+<div><strong style="color:var(--rosa-escuro);">${todos.length}</strong> pedido(s)</div>
+<div>·</div>
+<div>Total: <strong style="color:var(--rosa-escuro);">R$ ${formatarMoeda(totalGasto)}</strong></div>
+<div>·</div>
+<div>Ticket médio: <strong style="color:var(--rosa-escuro);">R$ ${formatarMoeda(totalGasto / todos.length)}</strong></div>
+${cad?.telefone ? `<div>·</div><div>${esc(cad.telefone)}</div>` : ''}
+</div>
+
+${top3.length > 0 ? `
+<div style="background:var(--rosa-claro);padding:10px 14px;border-radius:8px;margin-bottom:14px;">
+<div style="font-size:11px;color:var(--rosa-escuro);font-weight:600;margin-bottom:6px;">⭐ Mais comprados</div>
+${top3.map(([nome, info]) => `<div style="font-size:13px;color:var(--rosa-escuro);">• ${esc(nome)} <span style="color:var(--cinza);">— ${info.qtd}x (R$ ${formatarMoeda(info.valor)})</span></div>`).join('')}
+</div>` : ''}
+
+<div style="max-height:50vh;overflow-y:auto;">
+${todos.map(p => {
+let extra = {};
+try { extra = JSON.parse(p.dadosCompletos || '{}'); } catch(e) {}
+const itens = extra.itens || [];
+const corStatus = corDoStatus(p.status);
+return `
+<div style="border:1px solid var(--borda);border-radius:8px;padding:12px;margin-bottom:10px;">
+<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+<div style="font-weight:600;color:var(--rosa-escuro);">${formatarData(p.data)}${p.tema ? ` · ${esc(p.tema)}` : ''}</div>
+<div style="display:flex;gap:8px;align-items:center;">
+<span class="badge-status" style="background:${corStatus.bg};color:${corStatus.fg};">${esc(p.status)}</span>
+<strong>R$ ${formatarMoeda(p.total)}</strong>
+</div>
+</div>
+${itens.length > 0 ? `
+<table style="margin-top:8px;width:100%;font-size:12px;">
+<tbody>
+${itens.map(i => `<tr>
+<td style="padding:3px 0;">${esc(i.nome)}${i.descricao ? `<div style="font-size:10px;color:var(--cinza);">${esc(i.descricao)}</div>` : ''}</td>
+<td style="padding:3px 0;text-align:center;width:50px;">${i.qtd}x</td>
+<td style="padding:3px 0;text-align:right;width:80px;">R$ ${formatarMoeda(Number(i.valor) * Number(i.qtd))}</td>
+</tr>`).join('')}
+</tbody>
+</table>
+` : `<div style="font-size:12px;color:var(--cinza);margin-top:6px;">${esc(p.descricao || '—')}</div>`}
+${p.prazoEntrega ? `<div style="font-size:11px;color:var(--cinza);margin-top:6px;">Prazo: ${formatarData(p.prazoEntrega)}</div>` : ''}
+</div>`;
+}).join('')}
+</div>
+
+<div class="modal-botoes" style="margin-top:14px;">
+<button type="button" class="btn-cancelar" onclick="fecharModal()">Fechar</button>
+</div>
+</div>
+</div>`;
+document.body.insertAdjacentHTML('beforeend', html);
 }
 
 // ========================================================
