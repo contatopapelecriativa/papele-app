@@ -45,23 +45,58 @@ box-shadow: 0 4px 20px rgba(224,74,135,0.1); text-align: center; max-width: 380p
 .sublogo { font-size: 12px; color: var(--turquesa); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 24px; }
 .card-login p { color: var(--cinza); margin-bottom: 24px; }
 /* LAYOUT */
-#app { display: none; min-height: 100vh; }
-header { background: white; padding: 14px 24px; border-bottom: 1px solid var(--borda);
+#app { display: none; min-height: 100vh; flex-direction: column; }
+.app-header { background: white; padding: 12px 24px; border-bottom: 1px solid var(--borda);
 display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 10; }
-.logo-topo { font-family: 'Montserrat', Regular; font-size: 28px; color: var(--rosa); line-height: 1; }
+.header-logo { height: 40px; width: auto; display: block; }
+.header-right { display: flex; align-items: center; gap: 16px; }
 .sublogo-topo { font-size: 10px; color: var(--turquesa); letter-spacing: 1px; text-transform: uppercase; }
 .status-sync { font-size: 12px; color: var(--cinza); display: flex; align-items: center; gap: 8px; }
 .status-sync .ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--turquesa); }
 .btn-sair { background: transparent; border: 1px solid var(--borda); padding: 6px 12px;
 border-radius: 6px; font-size: 12px; color: var(--cinza); }
-nav.abas { background: white; padding: 0 24px; border-bottom: 1px solid var(--borda);
-display: flex; gap: 4px; overflow-x: auto; }
-nav.abas button { background: none; border: none; padding: 12px 16px; font-size: 14px; color: var(--cinza);
-border-bottom: 2px solid transparent; white-space: nowrap; }
-nav.abas button.ativo { color: var(--rosa); border-bottom-color: var(--rosa); font-weight: 500; }
-nav.abas button.destaque { color: var(--turquesa); margin-left: auto; }
-nav.abas button.destaque::before { content: '●'; margin-right: 6px; font-size: 10px; }
-main { padding: 24px; max-width: 1200px; margin: 0 auto; }
+.app-body { display: grid; grid-template-columns: 220px 1fr; flex: 1; min-height: 0; }
+.app-sidebar { background: var(--cinza-claro); border-right: 1px solid var(--borda); padding: 16px 8px;
+overflow-y: auto; }
+.sidebar-categoria { font-size: 11px; color: var(--rosa-escuro); font-weight: 600; letter-spacing: 1.2px;
+text-transform: uppercase; padding: 8px 12px 4px; margin-top: 8px; }
+.sidebar-categoria:first-child { margin-top: 0; }
+.sidebar-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 13px;
+color: #333; cursor: pointer; border-radius: 8px; margin: 1px 0; background: transparent;
+border: none; width: 100%; text-align: left; font-family: inherit; }
+.sidebar-item:hover { background: rgba(0,0,0,0.04); }
+.sidebar-item.ativo { background: var(--rosa); color: white; font-weight: 500; }
+.sidebar-item .ico { font-size: 16px; line-height: 1; width: 18px; display: inline-block; text-align: center; }
+.app-main { padding: 20px; overflow-x: auto; min-width: 0; }
+.app-bottom-nav { display: none; }
+.sub-abas-mobile { display: none; }
+
+@media (max-width: 768px) {
+.app-header { padding: 10px 16px; }
+.header-logo { height: 32px; }
+.btn-sair { padding: 5px 10px; font-size: 11px; }
+.status-sync { display: none; }
+.app-body { grid-template-columns: 1fr; }
+.app-sidebar { display: none; }
+.app-main { padding: 14px 14px 80px; }
+.app-bottom-nav { display: grid; grid-template-columns: repeat(4, 1fr); position: fixed;
+bottom: 0; left: 0; right: 0; background: white; border-top: 1px solid var(--borda);
+z-index: 50; padding: 6px 0; }
+.bottom-item { display: flex; flex-direction: column; align-items: center; gap: 2px;
+padding: 6px 4px; background: transparent; border: none; color: var(--cinza); font-family: inherit;
+font-size: 10px; cursor: pointer; }
+.bottom-item.ativo { color: var(--rosa); }
+.bottom-item .ico { font-size: 20px; line-height: 1; }
+.sub-abas-mobile { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 12px;
+border-bottom: 1px solid var(--borda); margin-bottom: 12px; }
+.sub-abas-mobile button { background: white; border: 1px solid var(--borda); border-radius: 16px;
+padding: 6px 14px; font-size: 12px; color: var(--cinza); white-space: nowrap;
+font-family: inherit; cursor: pointer; }
+.sub-abas-mobile button.ativo { background: var(--rosa); border-color: var(--rosa); color: white; font-weight: 500; }
+.sub-abas-mobile:empty { display: none; }
+.dashboard-grid { grid-template-columns: 1fr !important; }
+.stats-grid { grid-template-columns: 1fr 1fr; }
+}
 .cabecalho-aba { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
 .cabecalho-aba h2 { font-size: 20px; color: var(--rosa-escuro); font-weight: 600; }
 .cabecalho-aba p { font-size: 13px; color: var(--cinza); }
@@ -177,12 +212,9 @@ data-callback="handleCredentialResponse"></div>
 
 <!-- APP -->
 <div id="app">
-<header>
-<div>
-<img src="logo.png" alt="Papelê" style="height: 42px; width: auto; display: block;">
-<div class="sublogo-topo" style="margin-top: 2px;">Papelaria Criativa</div>
-</div>
-<div style="display:flex; align-items:center; gap:16px;">
+<header class="app-header">
+<img src="logo.png" alt="Papelê" class="header-logo">
+<div class="header-right">
 <div class="status-sync" id="status-sync">
 <span class="ponto"></span>
 <span id="status-texto">Sincronizado</span>
@@ -191,18 +223,18 @@ data-callback="handleCredentialResponse"></div>
 </div>
 </header>
 
-<nav class="abas">
-<button class="ativo" data-aba="clientes" onclick="mudarAba('clientes')">Clientes</button>
-<button data-aba="materiais" onclick="mudarAba('materiais')">Materiais</button>
-<button data-aba="produtos" onclick="mudarAba('produtos')">Produtos</button>
-<button data-aba="orcamentos" onclick="mudarAba('orcamentos')">Orçamentos</button>
-<button data-aba="pedidos" onclick="mudarAba('pedidos')">Pedidos</button>
-<button data-aba="fidelidade" onclick="mudarAba('fidelidade')">Fidelidade</button>
-<button data-aba="caixa" onclick="mudarAba('caixa')">Caixa</button>
-<button class="destaque" data-aba="bot" onclick="mudarAba('bot')">Bot orçamento</button>
-</nav>
+<div class="app-body">
 
-<main id="conteudo"><div class="spinner"></div></main>
+<aside class="app-sidebar" id="app-sidebar"></aside>
+
+<main class="app-main">
+<div id="sub-abas-mobile" class="sub-abas-mobile"></div>
+<div id="conteudo"><div class="spinner"></div></div>
+</main>
+
+</div>
+
+<nav class="app-bottom-nav" id="app-bottom-nav"></nav>
 </div>
 
 <div id="toast"></div>
@@ -222,7 +254,8 @@ logoUrl: 'logo.png'
 // ========================================================
 let emailAtual = null;
 let dados = { clientes: [], materiais: [], produtos: [], estoque: [], caixa: [], pedidos: [], receitas: [], configuracoes: {} };
-let abaAtual = 'clientes';
+let abaAtual = 'dashboard';
+let categoriaAtual = 'visao';
 let itensOrcamento = [];
 let materiaisProdutoAtual = [];
 let formaPagamentoAtual = null; // null = não especificar (default), 'pix' ou 'cartao'
@@ -266,8 +299,9 @@ document.getElementById('login-erro').style.display = 'none';
 carregarDadosIniciais().then(ok => {
 if (ok) {
 document.getElementById('tela-login').style.display = 'none';
-document.getElementById('app').style.display = 'block';
-mudarAba('clientes');
+document.getElementById('app').style.display = 'flex';
+mudarAba('dashboard');
+renderNav();
 } else {
 document.getElementById('login-erro').textContent = 'Seu email não está autorizado.';
 document.getElementById('login-erro').style.display = 'block';
@@ -349,17 +383,85 @@ return false;
 // ========================================================
 // NAVEGAÇÃO
 // ========================================================
+
+// Estrutura agrupada das abas
+const CATEGORIAS = [
+{ id: 'visao',     label: 'Visão',     ico: '◐', abas: ['dashboard', 'fidelidade'] },
+{ id: 'vendas',    label: 'Vendas',    ico: '✦', abas: ['bot', 'orcamentos', 'pedidos'] },
+{ id: 'cadastros', label: 'Cadastros', ico: '☰', abas: ['clientes', 'materiais', 'produtos'] },
+{ id: 'financas',  label: 'Finanças',  ico: '◈', abas: ['caixa'] }
+];
+const ABAS_INFO = {
+dashboard:  { label: 'Dashboard',     ico: '▦', categoria: 'visao' },
+fidelidade: { label: 'Fidelidade',    ico: '♥', categoria: 'visao' },
+bot:        { label: 'Bot orçamento', ico: '✦', categoria: 'vendas' },
+orcamentos: { label: 'Orçamentos',    ico: '▤', categoria: 'vendas' },
+pedidos:    { label: 'Pedidos',       ico: '▢', categoria: 'vendas' },
+clientes:   { label: 'Clientes',      ico: '☺', categoria: 'cadastros' },
+materiais:  { label: 'Materiais',     ico: '▣', categoria: 'cadastros' },
+produtos:   { label: 'Produtos',      ico: '⌘', categoria: 'cadastros' },
+caixa:      { label: 'Caixa',         ico: '◈', categoria: 'financas' }
+};
+
+// Renderiza sidebar (desktop) + bottom nav (mobile) + sub-abas (mobile)
+function renderNav() {
+const sb = document.getElementById('app-sidebar');
+if (sb) {
+sb.innerHTML = CATEGORIAS.map(cat => `
+<div class="sidebar-categoria">${cat.label}</div>
+${cat.abas.map(aba => {
+const info = ABAS_INFO[aba];
+return `<button class="sidebar-item ${abaAtual === aba ? 'ativo' : ''}" onclick="mudarAba('${aba}')">
+<span class="ico">${info.ico}</span>${info.label}
+</button>`;
+}).join('')}
+`).join('');
+}
+const bn = document.getElementById('app-bottom-nav');
+if (bn) {
+bn.innerHTML = CATEGORIAS.map(cat => `
+<button class="bottom-item ${categoriaAtual === cat.id ? 'ativo' : ''}" onclick="mudarCategoria('${cat.id}')">
+<span class="ico">${cat.ico}</span>${cat.label}
+</button>`).join('');
+}
+const sm = document.getElementById('sub-abas-mobile');
+if (sm) {
+const cat = CATEGORIAS.find(c => c.id === categoriaAtual);
+if (cat && cat.abas.length > 1) {
+sm.innerHTML = cat.abas.map(aba => {
+const info = ABAS_INFO[aba];
+return `<button class="${abaAtual === aba ? 'ativo' : ''}" onclick="mudarAba('${aba}')">${info.label}</button>`;
+}).join('');
+} else {
+sm.innerHTML = '';
+}
+}
+}
+
+function mudarCategoria(catId) {
+const cat = CATEGORIAS.find(c => c.id === catId);
+if (!cat) return;
+categoriaAtual = catId;
+// Vai pra primeira aba da categoria se a atual não pertence a ela
+if (!cat.abas.includes(abaAtual)) {
+mudarAba(cat.abas[0]);
+} else {
+renderNav();
+}
+}
+
 function mudarAba(aba) {
 abaAtual = aba;
-document.querySelectorAll('nav.abas button').forEach(b => {
-b.classList.toggle('ativo', b.dataset.aba === aba && aba !== 'bot');
-});
+const info = ABAS_INFO[aba];
+if (info) categoriaAtual = info.categoria;
+renderNav();
 renderizarAba(aba);
 }
 
 function renderizarAba(aba) {
 const c = document.getElementById('conteudo');
-if (aba === 'clientes') c.innerHTML = renderClientes();
+if (aba === 'dashboard') c.innerHTML = renderDashboard();
+else if (aba === 'clientes') c.innerHTML = renderClientes();
 else if (aba === 'materiais') c.innerHTML = renderMateriais();
 else if (aba === 'produtos') c.innerHTML = renderProdutos();
 else if (aba === 'orcamentos') c.innerHTML = renderOrcamentos();
@@ -367,6 +469,110 @@ else if (aba === 'pedidos') c.innerHTML = renderPedidos();
 else if (aba === 'fidelidade') c.innerHTML = renderFidelidade();
 else if (aba === 'caixa') c.innerHTML = renderCaixa();
 else if (aba === 'bot') c.innerHTML = renderBot();
+}
+
+// ========================================================
+// ABA: DASHBOARD (home)
+// ========================================================
+function renderDashboard() {
+const hoje = new Date(); hoje.setHours(0,0,0,0);
+const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+const nomeUsuario = (emailAtual || '').split('@')[0].split('.')[0];
+const nomeBonito = nomeUsuario ? nomeUsuario[0].toUpperCase() + nomeUsuario.slice(1) : '';
+const h = hoje.getHours();
+const saud = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
+
+const pedidosArr = dados.pedidos || [];
+const entregarHoje = pedidosArr.filter(p => {
+if (p.status !== 'Aprovado' && p.status !== 'Em produção') return false;
+const d = parseDataBR(p.prazoEntrega);
+return d && d.getTime() === hoje.getTime();
+});
+const emAtraso = pedidosArr.filter(p => {
+if (p.status !== 'Aprovado' && p.status !== 'Em produção') return false;
+const d = parseDataBR(p.prazoEntrega);
+return d && d < hoje;
+});
+const orcamentosPendentes = pedidosArr.filter(p => p.status === 'Orçamento');
+const receitaMes = pedidosArr.filter(p => {
+if (p.status !== 'Entregue' && p.status !== 'Em produção' && p.status !== 'Aprovado') return false;
+const d = parseDataBR(p.data);
+return d && d >= inicioMes;
+}).reduce((s, p) => s + (Number(p.total) || 0), 0);
+const materiaisBaixa = (dados.materiais || []).filter(m => Number(m.quantidade) <= Number(m.minimo || 0));
+
+const proximos = entregarHoje.concat(emAtraso).slice().sort((a, b) => {
+const da = parseDataBR(a.prazoEntrega) || new Date(8640000000000000);
+const db = parseDataBR(b.prazoEntrega) || new Date(8640000000000000);
+return da - db;
+}).slice(0, 5);
+
+const dataFmt = hoje.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
+
+return `
+<div style="margin-bottom: 20px;">
+<div style="font-size: 22px; font-weight: 500; color: var(--rosa-escuro);">${saud}${nomeBonito ? ', ' + nomeBonito : ''}</div>
+<div style="font-size: 13px; color: var(--cinza); margin-top: 4px; text-transform: capitalize;">${dataFmt}</div>
+</div>
+
+<div class="stats-grid">
+<div class="stat-card">
+<div class="stat-label">Entregar hoje</div>
+<div class="stat-valor">${entregarHoje.length}</div>
+</div>
+<div class="stat-card" style="${emAtraso.length>0 ? 'background:#fbe9e6;border-color:#f3c5bd;' : ''}">
+<div class="stat-label" style="${emAtraso.length>0 ? 'color:#791F1F' : ''}">Em atraso</div>
+<div class="stat-valor ${emAtraso.length>0 ? 'vermelho' : ''}">${emAtraso.length}</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">Orçamentos pendentes</div>
+<div class="stat-valor">${orcamentosPendentes.length}</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">Receita do mês</div>
+<div class="stat-valor" style="font-size:18px;">R$ ${formatarMoeda(receitaMes)}</div>
+</div>
+</div>
+
+<div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;" class="dashboard-grid">
+<div>
+<h3 style="font-size:15px;color:var(--rosa-escuro);font-weight:500;margin-bottom:8px;">Pra hoje</h3>
+${proximos.length === 0
+? '<div style="background:white;border:1px solid var(--borda);border-radius:12px;padding:14px;font-size:13px;color:var(--cinza);">Nenhum pedido pra entregar hoje. Que paz!</div>'
+: proximos.map(p => {
+const d = parseDataBR(p.prazoEntrega);
+const atrasado = d && d < hoje;
+return `<div style="background:white;border:1px solid ${atrasado?'#f3c5bd':'var(--borda)'};border-radius:12px;padding:10px 14px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="mudarAba('pedidos')">
+<div>
+<div style="font-size:13px;font-weight:500;color:var(--rosa-escuro);">${esc(p.cliente || '-')}</div>
+<div style="font-size:11px;color:var(--cinza);margin-top:2px;">${esc(p.descricao || '-')}</div>
+</div>
+<div style="font-size:11px;${atrasado?'color:#791F1F;font-weight:600;':'color:var(--cinza);'};text-align:right;white-space:nowrap;">
+${formatarData(p.prazoEntrega)}
+${atrasado ? '<div style="font-size:10px;">atrasado</div>' : ''}
+</div>
+</div>`;
+}).join('')}
+</div>
+<div>
+<h3 style="font-size:15px;color:var(--rosa-escuro);font-weight:500;margin-bottom:8px;">Atenção</h3>
+${materiaisBaixa.length === 0
+? '<div style="background:white;border:1px solid var(--borda);border-radius:12px;padding:14px;font-size:13px;color:var(--cinza);">Estoque tranquilo, nenhum material em baixa.</div>'
+: '<div style="background:white;border:1px solid var(--borda);border-radius:12px;padding:14px;">'
++ '<div style="font-size:13px;color:var(--rosa-escuro);font-weight:500;margin-bottom:8px;cursor:pointer;" onclick="mudarAba(\'materiais\')">' + materiaisBaixa.length + ' material(is) em baixa</div>'
++ materiaisBaixa.slice(0, 4).map(m => `<div style="font-size:12px;color:var(--cinza);padding:3px 0;">• ${esc(m.nome)} <span style="color:var(--vermelho);">(${m.quantidade || 0}/${m.minimo || 0})</span></div>`).join('')
++ (materiaisBaixa.length > 4 ? `<div style="font-size:11px;color:var(--cinza);margin-top:6px;">+ ${materiaisBaixa.length - 4} outros</div>` : '')
++ '</div>'
+}
+</div>
+</div>
+
+<div style="display:flex; gap:8px; flex-wrap:wrap;">
+<button class="btn-primario" onclick="mudarAba('bot')">+ Novo orçamento</button>
+<button class="btn-secundario" onclick="abrirModalGenerico('clientes')">+ Novo cliente</button>
+<button class="btn-secundario" onclick="abrirModalGenerico('caixa')">+ Movimentação</button>
+</div>
+`;
 }
 
 // ========================================================
