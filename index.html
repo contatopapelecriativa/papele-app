@@ -268,7 +268,7 @@ const FIDELIDADE_VIP_MIN_PEDIDOS = 5;
 const FIDELIDADE_INATIVO_DIAS = 90;
 
 // Estado do Bot de orçamento
-let camposBot = { cliente: '', contato: '', empresa: '', tema: '', prazoDias: '4' };
+let camposBot = { cliente: '', contato: '', empresa: '', tema: '', prazoDias: '' };
 let descontoPixAtual = 5;   // porcentagem padrão de desconto Pix
 let cupomAtual = '';         // ex: "papele10" → 10% off
 let orcamentoEditando = null; // { linhaId } quando editando um orçamento existente
@@ -477,10 +477,6 @@ else if (aba === 'bot') c.innerHTML = renderBot();
 function renderDashboard() {
 const hoje = new Date(); hoje.setHours(0,0,0,0);
 const inicioMes = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-const nomeUsuario = (emailAtual || '').split('@')[0].split('.')[0];
-const nomeBonito = nomeUsuario ? nomeUsuario[0].toUpperCase() + nomeUsuario.slice(1) : '';
-const h = hoje.getHours();
-const saud = h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite';
 
 const pedidosArr = dados.pedidos || [];
 const entregarHoje = pedidosArr.filter(p => {
@@ -511,8 +507,7 @@ const dataFmt = hoje.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeri
 
 return `
 <div style="margin-bottom: 20px;">
-<div style="font-size: 22px; font-weight: 500; color: var(--rosa-escuro);">${saud}${nomeBonito ? ', ' + nomeBonito : ''}</div>
-<div style="font-size: 13px; color: var(--cinza); margin-top: 4px; text-transform: capitalize;">${dataFmt}</div>
+<div style="font-size: 18px; font-weight: 500; color: var(--rosa-escuro); text-transform: capitalize;">${dataFmt}</div>
 </div>
 
 <div class="stats-grid">
@@ -1528,7 +1523,7 @@ renderizarAba('bot');
 function cancelarEdicaoBot() {
 orcamentoEditando = null;
 itensOrcamento = [];
-camposBot = { cliente: '', contato: '', empresa: '', tema: '', prazoDias: '4' };
+camposBot = { cliente: '', contato: '', empresa: '', tema: '', prazoDias: '' };
 formaPagamentoAtual = null;
 cupomAtual = '';
 descontoPixAtual = 5;
@@ -1714,9 +1709,18 @@ toast('PDF baixado!');
 // ========================================================
 // MODAL GENÉRICO
 // ========================================================
+const TITULOS_MODAL = {
+clientes:  { novo: 'Novo cliente',   editar: 'Editar cliente' },
+materiais: { novo: 'Novo material',  editar: 'Editar material' },
+produtos:  { novo: 'Novo produto',   editar: 'Editar produto' },
+caixa:     { novo: 'Nova movimentação', editar: 'Editar movimentação' },
+pedidos:   { novo: 'Novo pedido',    editar: 'Editar pedido' }
+};
+
 function abrirModalGenerico(aba, dadosEdicao = null, linhaId = null) {
 const campos = CAMPOS[aba];
-const titulo = dadosEdicao ? 'Editar' : 'Novo ' + aba.slice(0, -1);
+const tituloCfg = TITULOS_MODAL[aba] || { novo: 'Novo', editar: 'Editar' };
+const titulo = dadosEdicao ? tituloCfg.editar : tituloCfg.novo;
 const html = `
 <div class="modal-fundo" id="modal-fundo" onclick="if(event.target===this) fecharModal()">
 <div class="modal">
