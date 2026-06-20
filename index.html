@@ -249,6 +249,9 @@ googleClientId: '551735406249-p9f95t4p17dhn4kdcs56ejangsv1berl.apps.googleuserco
 logoUrl: 'logo.png'
 };
 
+// Chave Pix da Papelê — usada no preview e no PDF quando Pix está selecionado
+const CHAVE_PIX = 'contato.papelecriativa@gmail.com';
+
 // ========================================================
 // ESTADO
 // ========================================================
@@ -274,7 +277,7 @@ let cupomAtual = '';         // ex: "papele10" → 10% off
 let orcamentoEditando = null; // { linhaId } quando editando um orçamento existente
 
 const CAMPOS = {
-clientes: ['nome', 'telefone', 'email', 'documento', 'origem', 'endereco', 'primeiroContato', 'aniversario', 'obs'],
+clientes: ['nome', 'telefone', 'email'],
 materiais: ['nome', 'categoria', 'unidade', 'custo', 'fornecedor', 'quantidade', 'minimo', 'obs'],
 produtos: ['nome', 'categoria', 'unidade', 'valor', 'descricao', 'maoObra', 'outrosCustos', 'margemPct'],
 caixa: ['data', 'tipo', 'descricao', 'categoria', 'valor', 'pagamento', 'obs'],
@@ -582,13 +585,12 @@ return `
 </div>
 ${l.length === 0 ? '<div class="vazio">Nenhum cliente ainda.</div>' : `
 <div class="tabela-wrap"><table class="dados">
-<thead><tr><th>Nome</th><th>Telefone</th><th>Email</th><th>Origem</th><th></th></tr></thead>
+<thead><tr><th>Nome</th><th>Telefone</th><th>Email</th><th></th></tr></thead>
 <tbody>${l.map(c => `
 <tr>
 <td><strong>${esc(c.nome)}</strong></td>
 <td>${esc(c.telefone || '-')}</td>
 <td>${esc(c.email || '-')}</td>
-<td>${esc(c.origem || '-')}</td>
 <td class="acoes">
 <button class="btn-acao" onclick='editar("clientes", ${c._linha})'>✎</button>
 <button class="btn-acao" onclick='excluir("clientes", ${c._linha})'>🗑</button>
@@ -1050,14 +1052,56 @@ if (ok) await recarregarAba('pedidos');
 }
 
 // Reabre um orçamento salvo no Bot pra edição
+// Tenta reconstruir itens a partir da descrição compacta tipo "9x Item · 8x Outro".
+// Usado como fallback quando o pedido não tem dadosCompletos (versão antiga ou
+// coluna inexistente na planilha). Valor unitário fica 0 — usuário ajusta.
+function reconstruirItensDeDescricao(descricao, totalPedido) {
+const desc = String(descricao || '').trim();
+if (!desc) return [];
+const partes = desc.split(/\s*·\s*/);
+const itens = [];
+let totalQtd = 0;
+for (const parte of partes) {
+const m = parte.match(/^\s*(\d+(?:[\.,]\d+)?)x\s+(.+?)\s*$/i);
+if (m) {
+const qtd = Number(String(m[1]).replace(',', '.')) || 1;
+const nome = m[2].trim();
+if (nome) {
+itens.push({ nome, qtd, valor: 0, descricao: '', fonte: 'produto' });
+totalQtd += qtd;
+}
+} else if (parte.trim()) {
+itens.push({ nome: parte.trim(), qtd: 1, valor: 0, descricao: '', fonte: 'produto' });
+totalQtd += 1;
+}
+}
+// Distribui o total entre os itens proporcionalmente à quantidade pra que o PDF
+// reproduza pelo menos o total correto (mesmo sem ter os valores unitários reais)
+const tot = Number(totalPedido) || 0;
+if (tot > 0 && totalQtd > 0 && itens.length > 0) {
+const valorMedio = tot / totalQtd;
+itens.forEach(it => { it.valor = Number(valorMedio.toFixed(2)); });
+}
+return itens;
+}
+
+function carregarExtraDoOrcamento(p) {
+let extra = {};
+try { extra = JSON.parse(p.dadosCompletos || '{}'); } catch(e) {}
+let recuperado = false;
+if (!extra.itens || !extra.itens.length) {
+extra.itens = reconstruirItensDeDescricao(p.descricao, p.total);
+recuperado = extra.itens.length > 0;
+}
+return { extra, recuperado };
+}
+
 function editarNoBot(linha) {
 const p = dados.pedidos.find(x => x._linha === linha);
 if (!p) { toast('Orçamento não encontrado.'); return; }
-let extra = {};
-try { extra = JSON.parse(p.dadosCompletos || '{}'); } catch(e) {}
-
+const { extra, recuperado } = carregarExtraDoOrcamento(p);
 if (!extra.itens || !extra.itens.length) {
-toast('Esse orçamento foi salvo numa versão antiga e não pode ser reaberto. Crie um novo.');
+toast('Não consegui reconstruir esse orçamento. Crie um novo no Bot.');
 return;
 }
 
@@ -1080,18 +1124,18 @@ descontoPixAtual = Number(extra.descontoPixPct != null ? extra.descontoPixPct : 
 cupomAtual = extra.cupom || '';
 orcamentoEditando = { linhaId: linha, status: p.status };
 mudarAba('bot');
-toast('Orçamento carregado no Bot. Edite e clique em Atualizar.');
+toast(recuperado
+? 'Orçamento recuperado parcialmente. Confira os valores unitários antes de salvar.'
+: 'Orçamento carregado no Bot. Edite e clique em Atualizar.');
 }
 
 // Baixar PDF de um orçamento salvo (não precisa abrir Bot)
 async function baixarPdfDoOrcamento(linha) {
 const p = dados.pedidos.find(x => x._linha === linha);
 if (!p) { toast('Orçamento não encontrado.'); return; }
-let extra = {};
-try { extra = JSON.parse(p.dadosCompletos || '{}'); } catch(e) {}
-
+const { extra, recuperado } = carregarExtraDoOrcamento(p);
 if (!extra.itens || !extra.itens.length) {
-toast('Esse orçamento foi salvo numa versão antiga sem dados completos. Reabra no Bot pra refazer.');
+toast('Não consegui reconstruir esse orçamento pra gerar PDF.');
 return;
 }
 
@@ -1106,6 +1150,7 @@ formaPagamento: extra.formaPagamento || null,
 descontoPixPct: Number(extra.descontoPixPct != null ? extra.descontoPixPct : 5),
 cupom: extra.cupom || ''
 });
+if (recuperado) toast('PDF gerado a partir dos dados disponíveis. Valores unitários são estimados pelo total.');
 }
 
 // ========================================================
@@ -1458,7 +1503,8 @@ await recarregarAba('pedidos');
 function renderBlocoPagamento(subtotal, totalFinal) {
 if (formaPagamentoAtual === null) return '';
 if (formaPagamentoAtual === 'pix') {
-return `<div class="linha-pgto"><span>Forma de pagamento</span><strong>Pix</strong></div>`;
+return `<div class="linha-pgto"><span>Forma de pagamento</span><strong>Pix</strong></div>
+<div class="linha-pgto"><span>Chave Pix</span><strong style="font-size:11px;">${CHAVE_PIX}</strong></div>`;
 }
 return `
 <div class="linha-pgto"><span>Forma de pagamento</span><strong>Cartão de crédito</strong></div>
@@ -1669,8 +1715,9 @@ yFim += 4;
 
 // Bloco da forma de pagamento (texto curto)
 if (formaPgto !== null) {
+const alturaBloco = formaPgto === 'pix' ? 22 : 22;
 doc.setFillColor(255, 245, 249);
-doc.rect(20, yFim, 170, formaPgto === 'cartao' ? 22 : 16, 'F');
+doc.rect(20, yFim, 170, alturaBloco, 'F');
 doc.setFontSize(10);
 doc.setFont('helvetica', 'bold');
 doc.setTextColor(75, 21, 40);
@@ -1679,7 +1726,14 @@ doc.setFont('helvetica', 'normal');
 doc.setTextColor(60, 60, 60);
 if (formaPgto === 'pix') {
 doc.text('Pix', 80, yFim + 7);
-yFim += 20;
+doc.setFontSize(9);
+doc.setTextColor(75, 21, 40);
+doc.setFont('helvetica', 'bold');
+doc.text('Chave Pix:', 25, yFim + 14);
+doc.setFont('helvetica', 'normal');
+doc.setTextColor(60, 60, 60);
+doc.text(CHAVE_PIX, 50, yFim + 14);
+yFim += 26;
 } else {
 doc.text('Cartão de crédito', 80, yFim + 7);
 doc.setFontSize(8);
@@ -1746,8 +1800,19 @@ async function salvarModalGenerico(aba, linhaId) {
 const form = document.getElementById('form-modal');
 const dadosForm = {};
 CAMPOS[aba].forEach(c => { dadosForm[c] = form.elements[c].value; });
+// Se editando, preserva campos da planilha que não estão no formulário
+// (ex: cliente com endereço/aniversário cadastrados em colunas extras).
+let dadosFinal = dadosForm;
+if (linhaId) {
+const existente = (dados[aba] || []).find(x => x._linha === linhaId);
+if (existente) {
+const merged = { ...existente, ...dadosForm };
+delete merged._linha;
+dadosFinal = merged;
+}
+}
 const acao = linhaId ? 'atualizar' : 'adicionar';
-const payload = { acao, aba, dados: dadosForm };
+const payload = { acao, aba, dados: dadosFinal };
 if (linhaId) payload.linhaId = linhaId;
 const ok = await enviarPost(payload);
 if (ok) { fecharModal(); await recarregarAba(aba); }
